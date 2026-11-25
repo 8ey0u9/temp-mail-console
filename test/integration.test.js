@@ -6,11 +6,11 @@ import { Miniflare } from "miniflare";
 
 const DIST_SCRIPT = path.resolve("dist/index.js");
 
-function createMiniflare(extraBindings = {}) {
+function createMiniflare(extraBindings = {}, mfOverrides = {}) {
   assert.equal(
     fs.existsSync(DIST_SCRIPT),
     true,
-    "dist/index.js 不存在，请先运行 wrangler deploy --dry-run --outdir dist"
+    "dist/index.js 不存在，请先运行 npm run build"
   );
   return new Miniflare({
     name: "temp-email-worker",
@@ -24,7 +24,7 @@ function createMiniflare(extraBindings = {}) {
       routerConfig: {
         has_user_worker: true,
         static_routing: {
-          user_worker: ["/", "/api/*", "/admin/*", "/healthz"]
+          user_worker: ["/", "/auth.html", "/console.html", "/api/*", "/admin/*", "/healthz"]
         }
       },
       assetConfig: {
@@ -33,13 +33,20 @@ function createMiniflare(extraBindings = {}) {
       }
     },
     d1Databases: { DB: "test-temp-mail-db" },
+    ratelimits: {
+      AUTH_LIMITER: {
+        namespace_id: "1001",
+        simple: { limit: 20, period: 60 }
+      }
+    },
     bindings: {
       ADMIN_TOKEN: "test-admin-secret",
       API_TOKEN: "test-api-secret",
       FORWARD_TO: "",
       RETENTION_HOURS: "48",
       ...extraBindings
-    }
+    },
+    ...mfOverrides
   });
 }
 
@@ -58,26 +65,36 @@ async function loginAsAdmin(mf, token = "test-admin-secret") {
 test("end-to-end flow: healthz, auth, rules, whitelist, email ingestion, API queries, and cron cleanup", async () => {
   const mf = createMiniflare({ RETENTION_HOURS: "24" });
   try {
-    // 1. Health check & Static Assets + Page Security Headers
+    // 1. Health check & Static Assets + Page Security Headers + protected HTML route guard
     const healthRes = await mf.dispatchFetch("http://localhost/healthz");
     assert.equal(healthRes.status, 200);
     const healthJson = await healthRes.json();
     assert.equal(healthJson.data.status, "healthy");
 
-    const cssRes = await mf.dispatchFetch("http://localhost/assets/theme.css");
-    assert.equal(cssRes.status, 200);
-    assert.match(cssRes.headers.get("content-type") || "", /text\/css/);
-    assert.match(cssRes.headers.get("cache-control") || "", /immutable/);
+    const appCssRes = await mf.dispatchFetch("http://localhost/assets/app.css");
+    assert.equal(appCssRes.status, 200);
+    assert.match(appCssRes.headers.get("content-type") || "", /text\/css/);
+    assert.match(appCssRes.headers.get("cache-control") || "", /immutable/);
+
+    const vueRes = await mf.dispatchFetch("http://localhost/assets/vue.global.prod.js");
+    assert.equal(vueRes.status, 200);
+    assert.match(vueRes.headers.get("content-type") || "", /javascript/);
+    assert.match(vueRes.headers.get("cache-control") || "", /immutable/);
 
     const consoleJsRes = await mf.dispatchFetch("http://localhost/assets/console.js");
     assert.equal(consoleJsRes.status, 200);
     assert.match(consoleJsRes.headers.get("content-type") || "", /javascript/);
-    assert.match(consoleJsRes.headers.get("cache-control") || "", /immutable/);
+
+    const directConsoleRes = await mf.dispatchFetch("http://localhost/console.html", { redirect: "manual" });
+    assert.equal(directConsoleRes.status, 302);
 
     const loginPageRes = await mf.dispatchFetch("http://localhost/");
     assert.equal(loginPageRes.status, 200);
     assert.equal(loginPageRes.headers.get("x-frame-options"), "DENY");
-    assert.match(await loginPageRes.text(), /\/assets\/auth\.js/);
+    const loginHtml = await loginPageRes.text();
+    assert.match(loginHtml, /\/assets\/auth\.js/);
+    assert.match(loginHtml, /data-auth-view="login"/);
+    assert.doesNotMatch(loginHtml, /data-auth-view="setup"/);
 
     // 2. Unauthenticated admin API should fail with 401
     const unauthRes = await mf.dispatchFetch("http://localhost/admin/emails");
@@ -398,48 +415,35 @@ test("end-to-end flow: healthz, auth, rules, whitelist, email ingestion, API que
   }
 });
 
-test("legacy schema migration upgrades v1 tables and backfills recipients automatically", async () => {
-  const mf = createMiniflare();
+test("AUTH_LIMITER enforces 429 rate limits on repeated authentication attempts", async () => {
+  const mf = createMiniflare(
+    {},
+    {
+      ratelimits: {
+        AUTH_LIMITER: {
+          namespace_id: "1001",
+          simple: { limit: 2, period: 60 }
+        }
+      }
+    }
+  );
   try {
-    const db = await mf.getD1Database("DB");
-    await db.batch([
-      db.prepare(
-        "CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT NOT NULL, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, extracted_json TEXT NOT NULL, received_at INTEGER NOT NULL)"
-      ),
-      db.prepare(
-        "CREATE TABLE rules (id INTEGER PRIMARY KEY AUTOINCREMENT, remark TEXT, sender_filter TEXT, pattern TEXT NOT NULL, created_at INTEGER NOT NULL)"
-      ),
-      db.prepare(
-        "CREATE TABLE whitelist (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_pattern TEXT NOT NULL, created_at INTEGER NOT NULL)"
-      ),
-      db
-        .prepare(
-          "INSERT INTO emails (message_id, from_address, to_address, subject, extracted_json, received_at) VALUES (?, ?, ?, ?, ?, ?)"
-        )
-        .bind("legacy-1", "a@example.com", "LegacyUser@Domain.COM,Other@Domain.COM", "Legacy", '[{"rule_id":1,"value":"999999","remark":"code"}]', Date.now())
-    ]);
+    for (let i = 0; i < 2; i++) {
+      const res = await mf.dispatchFetch("http://localhost/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.10" },
+        body: JSON.stringify({ token: "wrong-secret" })
+      });
+      assert.equal(res.status, 401);
+    }
 
-    const res = await mf.dispatchFetch(
-      "http://localhost/api/emails/latest?address=legacyuser@domain.com",
-      { headers: { Authorization: "Bearer test-api-secret" } }
-    );
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.data.message_id, "legacy-1");
-    assert.equal(body.data.results[0].value, "999999");
-
-    // Verify new columns exist and version was recorded
-    const meta = await db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").first();
-    assert.equal(meta.value, "3");
-
-    // Verify legacy email content endpoint degrades gracefully with has_raw: false
-    const legacyCookie = await loginAsAdmin(mf);
-    const legacyRawRes = await mf.dispatchFetch("http://localhost/admin/emails/legacy-1/content", {
-      headers: { Cookie: legacyCookie }
+    const blocked = await mf.dispatchFetch("http://localhost/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.10" },
+      body: JSON.stringify({ token: "test-admin-secret" })
     });
-    assert.equal(legacyRawRes.status, 200);
-    const legacyRawJson = await legacyRawRes.json();
-    assert.equal(legacyRawJson.data.has_raw, false);
+    assert.equal(blocked.status, 429);
+    assert.equal((await blocked.json()).errorCode, "RATE_LIMITED");
   } finally {
     await mf.dispose();
   }

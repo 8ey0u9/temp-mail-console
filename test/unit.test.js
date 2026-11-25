@@ -219,8 +219,15 @@ test("PBKDF2 password hashing, HMAC session tokens, and settings validators work
   const hashed = await hashAdminPassword("StrongPass#2026");
   assert.equal(hashed.salt.length, 32);
   assert.equal(hashed.hash.length, 64);
+  assert.equal(hashed.iterations, 20000);
   assert.equal(await verifyAdminPassword("StrongPass#2026", hashed), true);
   assert.equal(await verifyAdminPassword("WrongPass#2026", hashed), false);
+
+  const legacyHashed = await hashAdminPassword("LegacyPass#100k", undefined, 100000);
+  assert.equal(
+    await verifyAdminPassword("LegacyPass#100k", { salt: legacyHashed.salt, hash: legacyHashed.hash }),
+    true
+  );
 
   const sessionTok = await signSessionToken("secret-key-hex");
   assert.equal(await verifySessionToken(sessionTok, "secret-key-hex"), true);
