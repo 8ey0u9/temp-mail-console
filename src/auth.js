@@ -88,3 +88,26 @@ export function isWeakOrMissingToken(token, defaultSet) {
   const trimmed = String(token || "").trim();
   return !trimmed || defaultSet.has(trimmed);
 }
+
+/**
+ * 判断请求是否来自本地开发环境（localhost / loopback / .local），
+ * 仅本地开发允许使用公开默认示例口令。
+ */
+export function isLocalDevRequest(request) {
+  try {
+    const host = new URL(request.url).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".local");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 返回令牌当前安全状态：missing（未配置）、weak（非本地环境仍使用公开默认口令）、ok（可用）。
+ */
+export function getTokenSecurityState(token, defaultSet, request) {
+  const trimmed = String(token || "").trim();
+  if (!trimmed) return "missing";
+  if (defaultSet.has(trimmed) && !isLocalDevRequest(request)) return "weak";
+  return "ok";
+}

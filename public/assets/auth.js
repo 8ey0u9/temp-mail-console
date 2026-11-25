@@ -86,7 +86,18 @@
         return;
       }
       if (!res.ok) {
-        setError("auth.errLoginFailed");
+        let code = "";
+        try {
+          const payload = await res.json();
+          code = payload?.errorCode || "";
+        } catch {}
+        if (code === "WEAK_ADMIN_TOKEN") {
+          setError("auth.errWeakToken");
+        } else if (code === "MISSING_ADMIN_TOKEN") {
+          setError("auth.missingTitle");
+        } else {
+          setError("auth.errLoginFailed");
+        }
         return;
       }
       window.location.href = "/";

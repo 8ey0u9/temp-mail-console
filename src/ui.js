@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "0.3.4";
+export const ASSET_VERSION = "0.3.5";
 
 function renderBaseHead(title, { includeVue = false } = {}) {
   const v = ASSET_VERSION;
@@ -19,7 +19,7 @@ function renderBaseHead(title, { includeVue = false } = {}) {
   </head>`;
 }
 
-export function renderAuthHtml({ missingAdminToken = false } = {}) {
+export function renderAuthHtml({ missingAdminToken = false, weakAdminToken = false } = {}) {
   const v = ASSET_VERSION;
   return `<!DOCTYPE html>
 <html lang="zh" data-theme="dark">
@@ -38,12 +38,17 @@ export function renderAuthHtml({ missingAdminToken = false } = {}) {
       </div>
       <h1 class="text-xl font-semibold tmc-text-primary tracking-tight mb-1" data-i18n="auth.heading">Temp Mail Console</h1>
       ${
-        missingAdminToken
-          ? `<div class="mt-4 p-4 rounded-xl tmc-badge-warn text-[12px] space-y-2 leading-relaxed">
-              <div class="font-semibold" data-i18n="auth.missingTitle">尚未配置 ADMIN_TOKEN</div>
-              <p data-i18n="auth.missingLocal">本地开发请在项目根目录创建 .dev.vars 并设置 ADMIN_TOKEN。</p>
-              <p data-i18n="auth.missingProd">线上部署请在 Cloudflare Worker 的 Settings → Variables 中配置，或执行 wrangler secret put ADMIN_TOKEN。</p>
+        weakAdminToken
+          ? `<div class="mt-4 p-4 rounded-xl tmc-badge-danger text-[12px] space-y-2 leading-relaxed">
+              <div class="font-semibold" data-i18n="auth.weakTitle">生产环境已禁用默认口令</div>
+              <p data-i18n="auth.weakDesc">检测到当前 ADMIN_TOKEN 仍为默认弱口令，出于安全限制已禁止登录。请前往 Cloudflare Worker 的 Settings → Variables and Secrets 设置强密码，切勿将密钥写入公开仓库。</p>
             </div>`
+          : missingAdminToken
+            ? `<div class="mt-4 p-4 rounded-xl tmc-badge-warn text-[12px] space-y-2 leading-relaxed">
+                <div class="font-semibold" data-i18n="auth.missingTitle">尚未配置 ADMIN_TOKEN</div>
+                <p data-i18n="auth.missingLocal">本地开发请在项目根目录创建 .dev.vars 并设置 ADMIN_TOKEN。</p>
+                <p data-i18n="auth.missingProd">线上部署请在 Cloudflare Worker 的 Settings → Variables and Secrets 中配置，或执行 wrangler secret put ADMIN_TOKEN（切勿写入公开仓库的 wrangler.toml）。</p>
+              </div>`
           : `<p class="text-[13px] tmc-text-muted mb-8" data-i18n="auth.subtitle">请输入管理员令牌以继续</p>
       <form class="space-y-4" onsubmit="return false;">
         <input

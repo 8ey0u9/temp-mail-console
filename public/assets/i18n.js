@@ -34,9 +34,12 @@
         loggingIn: "登录中...",
         missingTitle: "尚未配置 ADMIN_TOKEN",
         missingLocal: "本地开发请在项目根目录创建 .dev.vars 并设置 ADMIN_TOKEN。",
-        missingProd: "线上部署请在 Cloudflare Worker 的 Settings → Variables 中配置，或执行 wrangler secret put ADMIN_TOKEN。",
+        missingProd: "线上部署请在 Cloudflare Worker 的 Settings → Variables and Secrets 中配置，或执行 wrangler secret put ADMIN_TOKEN（切勿写入公开仓库的 wrangler.toml）。",
+        weakTitle: "生产环境已禁用默认口令",
+        weakDesc: "检测到当前 ADMIN_TOKEN 仍为默认弱口令，出于安全限制已禁止登录。请前往 Cloudflare Worker 的 Settings → Variables and Secrets 设置强密码，切勿将密钥写入公开仓库。",
         errEmptyToken: "请输入访问令牌",
         errWrongToken: "访问令牌不正确，请重试",
+        errWeakToken: "生产环境禁止使用默认口令，请先在 Cloudflare Secrets 修改为强密码",
         errLoginFailed: "登录失败，请重试",
         errNetwork: "网络请求失败，请检查服务状态"
       },
@@ -208,6 +211,8 @@
         WHITELIST_NOT_FOUND: "白名单记录不存在",
         INVALID_JSON: "请求体不是有效的 JSON 对象",
         INVALID_ID: "无效的记录 ID",
+        MISSING_ADMIN_TOKEN: "ADMIN_TOKEN 环境变量未配置",
+        WEAK_ADMIN_TOKEN: "生产环境禁止使用默认口令，请前往 Cloudflare Secrets 修改强密码",
         INTERNAL_ERROR: "服务器内部错误，请稍后重试"
       }
     },
@@ -245,9 +250,12 @@
         loggingIn: "Signing in...",
         missingTitle: "ADMIN_TOKEN is not configured",
         missingLocal: "For local development, create .dev.vars in the project root and set ADMIN_TOKEN.",
-        missingProd: "For production, set ADMIN_TOKEN in Cloudflare Worker Settings → Variables or run wrangler secret put ADMIN_TOKEN.",
+        missingProd: "For production, set ADMIN_TOKEN in Cloudflare Worker Settings → Variables and Secrets or run wrangler secret put ADMIN_TOKEN (never commit secrets to wrangler.toml).",
+        weakTitle: "Default token disabled in production",
+        weakDesc: "ADMIN_TOKEN is still set to a public default value and has been blocked for security. Set a strong secret in Cloudflare Worker Settings → Variables and Secrets—never store tokens in a public repository.",
         errEmptyToken: "Please enter your access token",
         errWrongToken: "Invalid token, please try again",
+        errWeakToken: "Default token is disabled in production; update ADMIN_TOKEN in Cloudflare Secrets first",
         errLoginFailed: "Login failed, please try again",
         errNetwork: "Network request failed, please check the server"
       },
@@ -419,6 +427,8 @@
         WHITELIST_NOT_FOUND: "Whitelist entry not found",
         INVALID_JSON: "Request body must be a valid JSON object",
         INVALID_ID: "Invalid resource ID",
+        MISSING_ADMIN_TOKEN: "ADMIN_TOKEN is not configured",
+        WEAK_ADMIN_TOKEN: "Default token is disabled in production; update ADMIN_TOKEN in Cloudflare Secrets",
         INTERNAL_ERROR: "Internal server error, please try again later"
       }
     }

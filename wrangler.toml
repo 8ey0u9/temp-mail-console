@@ -12,11 +12,11 @@ run_worker_first = ["/", "/api/*", "/admin/*", "/healthz"]
 [[d1_databases]]
 binding = "DB"
 database_name = "temp-email-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+# 一键部署向导会自动创建 D1 并填充 ID；本地手动部署请填入 wrangler d1 create 返回的真实 UUID
+database_id = ""
 
 [vars]
-# 非敏感配置；ADMIN_TOKEN 与 API_TOKEN 请在本地通过 .dev.vars、线上通过 `wrangler secret put` 设置
-FORWARD_TO = ""
+# 仅存放非敏感变量；ADMIN_TOKEN、API_TOKEN 与可选的 FORWARD_TO 请通过 Cloudflare Variables and Secrets、wrangler secret put 或本地 .dev.vars 配置，严禁提交到公开仓库
 RETENTION_HOURS = "48"
 
 [triggers]

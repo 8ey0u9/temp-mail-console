@@ -4,6 +4,7 @@ import {
   buildClearSessionCookie,
   buildSessionCookie,
   constantTimeEqual,
+  getTokenSecurityState,
   isAdminAuthorized,
   isApiAuthorized,
   isWeakOrMissingToken
@@ -152,6 +153,13 @@ async function handleFetch(request, env) {
   if (pathname === "/api/emails/latest" || pathname === "/api/emails") {
     if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
     if (method !== "GET") return jsonError("Method Not Allowed", 405, CORS_HEADERS);
+    const apiBlocked = checkTokenPolicy(env.API_TOKEN, DEFAULT_API_TOKENS, request, {
+      name: "API_TOKEN",
+      headers: CORS_HEADERS,
+      missingCode: "MISSING_API_TOKEN",
+      weakCode: "WEAK_API_TOKEN"
+    });
+    if (apiBlocked) return apiBlocked.response;
     if (!isApiAuthorized(request, env.API_TOKEN)) {
       return jsonError("Unauthorized", 401, CORS_HEADERS);
     }
@@ -163,9 +171,15 @@ async function handleFetch(request, env) {
 
   // ── 控制台页面 (/) ────────────────────────────────────────────────────────
   if (pathname === "/") {
-    const missingAdminToken = !String(env.ADMIN_TOKEN || "").trim();
-    if (missingAdminToken || !isAdminAuthorized(request, env.ADMIN_TOKEN)) {
-      return new Response(renderAuthHtml({ missingAdminToken }), { headers: HTML_HEADERS });
+    const adminState = getTokenSecurityState(env.ADMIN_TOKEN, DEFAULT_ADMIN_TOKENS, request);
+    if (adminState !== "ok" || !isAdminAuthorized(request, env.ADMIN_TOKEN)) {
+      return new Response(
+        renderAuthHtml({
+          missingAdminToken: adminState === "missing",
+          weakAdminToken: adminState === "weak"
+        }),
+        { headers: HTML_HEADERS }
+      );
     }
     return new Response(renderHtml({ pageSize: PAGE_SIZE, rulesPageSize: RULES_PAGE_SIZE }), {
       headers: HTML_HEADERS
@@ -182,6 +196,12 @@ async function handleFetch(request, env) {
 
   // ── 管理 API (/admin/*) ───────────────────────────────────────────────────
   if (pathname.startsWith("/admin/")) {
+    const adminBlocked = checkTokenPolicy(env.ADMIN_TOKEN, DEFAULT_ADMIN_TOKENS, request, {
+      name: "ADMIN_TOKEN",
+      missingCode: "MISSING_ADMIN_TOKEN",
+      weakCode: "WEAK_ADMIN_TOKEN"
+    });
+    if (adminBlocked) return adminBlocked.response;
     if (!isAdminAuthorized(request, env.ADMIN_TOKEN)) {
       return jsonError("Unauthorized", 401, {}, "UNAUTHORIZED");
     }
@@ -312,10 +332,27 @@ async function readValidatedBody(request, validator) {
   return { ok: true, value: validated.value, raw: parsedBody.data };
 }
 
-async function handleAdminLogin(request, env) {
-  const expected = String(env.ADMIN_TOKEN || "").trim();
-  if (!expected) return jsonError("ADMIN_TOKEN 环境变量未配置", 503, {}, "MISSING_ADMIN_TOKEN");
+function checkTokenPolicy(token, defaultSet, request, { name, headers = {}, missingCode, weakCode }) {
+  const state = getTokenSecurityState(token, defaultSet, request);
+  if (state === "ok") return null;
+  const message = state === "missing"
+    ? `${name} 环境变量未配置`
+    : `生产环境禁止使用默认 ${name}，请在 Cloudflare Secrets 中修改为强密码`;
+  return {
+    state,
+    response: jsonError(message, 503, headers, state === "missing" ? missingCode : weakCode)
+  };
+}
 
+async function handleAdminLogin(request, env) {
+  const adminBlocked = checkTokenPolicy(env.ADMIN_TOKEN, DEFAULT_ADMIN_TOKENS, request, {
+    name: "ADMIN_TOKEN",
+    missingCode: "MISSING_ADMIN_TOKEN",
+    weakCode: "WEAK_ADMIN_TOKEN"
+  });
+  if (adminBlocked) return adminBlocked.response;
+
+  const expected = String(env.ADMIN_TOKEN || "").trim();
   const parsed = await parseJsonBody(request);
   const candidate = parsed.ok ? String(parsed.data.token || "").trim() : "";
   if (!candidate) return jsonError("请输入访问密码", 400, {}, "EMPTY_TOKEN");
