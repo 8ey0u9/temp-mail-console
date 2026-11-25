@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Temp Mail Console - Login</title>
+    <script src="/assets/preinit.js?v=0.5.2"></script>
+    <link rel="stylesheet" href="/assets/app.css?v=0.5.2" />
+    <link rel="stylesheet" href="/assets/theme.css?v=0.5.2" />
+  </head>
+  <body class="antialiased flex items-center justify-center min-h-screen px-4 selection:bg-indigo-500/30">
+    <div class="fixed inset-0 tmc-glow pointer-events-none"></div>
+
+    <div class="fixed top-4 right-4 flex items-center gap-2 text-[11px] z-10">
+      <button id="theme-toggle" type="button" class="px-2.5 py-1.5 rounded-lg tmc-btn-ghost flex items-center gap-1.5 transition-colors"></button>
+      <button id="lang-toggle" type="button" class="px-2.5 py-1.5 rounded-lg tmc-btn-ghost font-medium transition-colors"></button>
+    </div>
+
+    <div class="w-full max-w-sm p-8 rounded-[1.5rem] tmc-card backdrop-blur-xl relative">
+      <div class="w-12 h-12 mb-6 flex border border-white/10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-inner shadow-white/20">
+        <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+      </div>
+      <h1 id="auth-heading" class="text-xl font-semibold tmc-text-primary tracking-tight mb-1" data-i18n="auth.heading">Temp Mail Console</h1>
+
+      <div data-auth-view="setup">
+        <p class="text-[13px] tmc-text-muted mb-6 leading-relaxed" data-i18n="auth.setupDesc">首次使用请设置管理员登录密码（至少 8 位且禁用默认弱口令），系统将自动为您生成随机 API_TOKEN。</p>
+        <form class="space-y-4" onsubmit="return false;">
+          <input
+            id="setup-token"
+            type="password"
+            class="w-full px-4 py-2.5 rounded-xl tmc-input transition-all text-[13px]"
+            placeholder="设置管理员密码 (至少 8 位)"
+            data-i18n-placeholder="auth.setupPlaceholder"
+            autocomplete="new-password"
+          />
+          <input
+            id="setup-token-confirm"
+            type="password"
+            class="w-full px-4 py-2.5 rounded-xl tmc-input transition-all text-[13px]"
+            placeholder="再次确认管理员密码"
+            data-i18n-placeholder="auth.setupConfirmPlaceholder"
+            autocomplete="new-password"
+          />
+          <div id="admin-error" class="text-[12px] tmc-badge-danger px-3 py-2 rounded-lg hidden"></div>
+          <button
+            id="setup-submit"
+            type="button"
+            class="w-full py-2.5 rounded-xl tmc-btn-primary font-medium text-[13px] transition-colors shadow-lg disabled:opacity-50"
+            data-i18n="auth.setupBtn"
+          >初始化并进入控制台</button>
+        </form>
+      </div>
+
+      <div data-auth-view="weak" class="mt-4 p-4 rounded-xl tmc-badge-danger text-[12px] space-y-2 leading-relaxed">
+        <div class="font-semibold" data-i18n="auth.weakTitle">生产环境已禁用默认口令</div>
+        <p data-i18n="auth.weakDesc">检测到当前 ADMIN_TOKEN 仍为默认弱口令，出于安全限制已禁止登录。请前往 Cloudflare Worker 的 Settings → Variables and Secrets 设置强密码，切勿将密钥写入公开仓库。</p>
+      </div>
+
+      <div data-auth-view="missing" class="mt-4 p-4 rounded-xl tmc-badge-warn text-[12px] space-y-2 leading-relaxed">
+        <div class="font-semibold" data-i18n="auth.missingTitle">尚未配置 ADMIN_TOKEN</div>
+        <p data-i18n="auth.missingLocal">本地开发请在项目根目录创建 .dev.vars 并设置 ADMIN_TOKEN。</p>
+        <p data-i18n="auth.missingProd">线上部署请在 Cloudflare Worker 的 Settings → Variables and Secrets 中配置，或执行 wrangler secret put ADMIN_TOKEN（切勿写入公开仓库的 wrangler.toml）。</p>
+      </div>
+
+      <div data-auth-view="login">
+        <p class="text-[13px] tmc-text-muted mb-8" data-i18n="auth.subtitle">请输入管理员令牌以继续</p>
+        <form class="space-y-4" onsubmit="return false;">
+          <input
+            id="admin-token"
+            type="password"
+            class="w-full px-4 py-2.5 rounded-xl tmc-input transition-all text-[13px]"
+            placeholder="管理员令牌 (ADMIN_TOKEN)"
+            data-i18n-placeholder="auth.tokenPlaceholder"
+            autocomplete="current-password"
+          />
+          <div id="admin-error" class="text-[12px] tmc-badge-danger px-3 py-2 rounded-lg hidden"></div>
+          <button
+            id="admin-submit"
+            type="button"
+            class="w-full py-2.5 rounded-xl tmc-btn-primary font-medium text-[13px] transition-colors shadow-lg disabled:opacity-50"
+            data-i18n="auth.loginBtn"
+          >安全登录</button>
+        </form>
+      </div>
+    </div>
+
+    <script src="/assets/i18n.js?v=0.5.2" defer></script>
+    <script src="/assets/auth.js?v=0.5.2" defer></script>
+  </body>
+</html>

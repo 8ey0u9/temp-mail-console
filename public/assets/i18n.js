@@ -54,7 +54,7 @@
       header: {
         pageTitle: "Temp Mail Console",
         brandTitle: "Temporary Mail Console",
-        brandSub: "Cloudflare Workers · D1 Database · 保留 {hours} 小时",
+        brandSub: "Cloudflare Workers · D1 Database · Free Plan",
         forwardEnabled: "自动转发已开启",
         live: "实时",
         paused: "已暂停",
@@ -277,6 +277,7 @@
         FORWARD_EMAIL_REQUIRED: "启用转发时必须填写目标邮箱",
         INVALID_FORWARD_EMAIL: "转发邮箱格式不正确",
         INVALID_RETENTION_HOURS: "保留时长须为 {min} 到 {max} 之间的整数小时",
+        RATE_LIMITED: "操作过于频繁，请稍后再试",
         INTERNAL_ERROR: "服务器内部错误，请稍后重试"
       }
     },
@@ -334,7 +335,7 @@
       header: {
         pageTitle: "Temp Mail Console",
         brandTitle: "Temporary Mail Console",
-        brandSub: "Cloudflare Workers · D1 Database · {hours}h retention",
+        brandSub: "Cloudflare Workers · D1 Database · Free Plan",
         forwardEnabled: "Forwarding enabled",
         live: "Live",
         paused: "Paused",
@@ -557,6 +558,7 @@
         FORWARD_EMAIL_REQUIRED: "Destination email is required when forwarding is enabled",
         INVALID_FORWARD_EMAIL: "Invalid forwarding email address format",
         INVALID_RETENTION_HOURS: "Retention hours must be an integer between {min} and {max}",
+        RATE_LIMITED: "Too many attempts, please try again later",
         INTERNAL_ERROR: "Internal server error, please try again later"
       }
     }
