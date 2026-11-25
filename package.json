@@ -18,15 +18,5 @@
   },
   "devDependencies": {
     "wrangler": "^4.72.0"
-  },
-  "cloudflare": {
-    "bindings": {
-      "ADMIN_TOKEN": {
-        "description": "Console admin password. Use a strong random string (stored securely as an encrypted Cloudflare Secret, never committed to Git)."
-      },
-      "API_TOKEN": {
-        "description": "Bearer token for /api/emails* queries. Use a strong random string (stored securely as an encrypted Cloudflare Secret)."
-      }
-    }
   }
 }
