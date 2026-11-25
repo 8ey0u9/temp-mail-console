@@ -1,0 +1,203 @@
+:root,
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-page: #09090b;
+  --bg-glow: radial-gradient(circle at top center, rgba(99, 102, 241, 0.09), transparent 55%);
+  --bg-card: rgba(255, 255, 255, 0.025);
+  --bg-card-header: rgba(255, 255, 255, 0.015);
+  --bg-subtle: rgba(255, 255, 255, 0.03);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active-tab: rgba(255, 255, 255, 0.11);
+  --bg-input: rgba(0, 0, 0, 0.28);
+  --bg-select: #111116;
+  --bg-code: #030303;
+  --bg-modal: #111115;
+  --border-main: rgba(255, 255, 255, 0.09);
+  --border-soft: rgba(255, 255, 255, 0.06);
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-faint: #64748b;
+  --btn-primary-bg: #ffffff;
+  --btn-primary-hover: #e2e8f0;
+  --btn-primary-text: #0f172a;
+  --accent-bg: rgba(99, 102, 241, 0.14);
+  --accent-border: rgba(99, 102, 241, 0.28);
+  --accent-text: #c7d2fe;
+  --regex-text: #a5b4fc;
+  --success-bg: rgba(16, 185, 129, 0.14);
+  --success-border: rgba(16, 185, 129, 0.28);
+  --success-text: #6ee7b7;
+  --warn-bg: rgba(245, 158, 11, 0.12);
+  --warn-border: rgba(245, 158, 11, 0.26);
+  --warn-text: #fde68a;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --danger-border: rgba(239, 68, 68, 0.26);
+  --danger-text: #fca5a5;
+  --shadow-card: 0 20px 45px -20px rgba(0, 0, 0, 0.55);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg-page: #f4f6fb;
+  --bg-glow: radial-gradient(circle at top center, rgba(99, 102, 241, 0.08), transparent 55%);
+  --bg-card: #ffffff;
+  --bg-card-header: #f8fafc;
+  --bg-subtle: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  --bg-active-tab: #ffffff;
+  --bg-input: #f8fafc;
+  --bg-select: #ffffff;
+  --bg-code: #f1f5f9;
+  --bg-modal: #ffffff;
+  --border-main: #e2e8f0;
+  --border-soft: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  --text-faint: #64748b;
+  --btn-primary-bg: #0f172a;
+  --btn-primary-hover: #1e293b;
+  --btn-primary-text: #ffffff;
+  --accent-bg: #eef2ff;
+  --accent-border: #c7d2fe;
+  --accent-text: #3730a3;
+  --regex-text: #4338ca;
+  --success-bg: #ecfdf5;
+  --success-border: #a7f3d0;
+  --success-text: #047857;
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-text: #92400e;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-text: #b91c1c;
+  --shadow-card: 0 10px 30px -12px rgba(15, 23, 42, 0.08);
+}
+
+[v-cloak] {
+  display: none !important;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-page);
+  color: var(--text-secondary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.tmc-glow { background-image: var(--bg-glow); }
+.tmc-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-main);
+  box-shadow: var(--shadow-card);
+}
+.tmc-card-header {
+  background-color: var(--bg-card-header);
+  border-bottom: 1px solid var(--border-soft);
+}
+.tmc-subcard {
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+}
+.tmc-row {
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+}
+.tmc-row:hover {
+  background-color: var(--bg-hover);
+}
+.tmc-input {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-main);
+  color: var(--text-primary);
+}
+.tmc-input::placeholder { color: var(--text-faint); }
+.tmc-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.45);
+}
+select.tmc-input,
+select.tmc-input option {
+  background-color: var(--bg-select);
+  color: var(--text-primary);
+}
+.tmc-code {
+  background-color: var(--bg-code);
+  border: 1px solid var(--border-soft);
+  color: var(--text-secondary);
+}
+.tmc-modal {
+  background-color: var(--bg-modal);
+  border: 1px solid var(--border-main);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+}
+.tmc-btn-primary {
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+}
+.tmc-btn-primary:hover:not(:disabled) {
+  background-color: var(--btn-primary-hover);
+}
+.tmc-btn-ghost {
+  border: 1px solid var(--border-main);
+  background-color: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+.tmc-btn-ghost:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+.tmc-tab-active {
+  background-color: var(--bg-active-tab);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.tmc-tab-idle {
+  color: var(--text-muted);
+  border: 1px solid transparent;
+}
+.tmc-tab-idle:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-hover);
+}
+.tmc-accent-box {
+  background-color: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
+}
+.tmc-badge-success {
+  background-color: var(--success-bg);
+  border: 1px solid var(--success-border);
+  color: var(--success-text);
+}
+.tmc-badge-warn {
+  background-color: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+}
+.tmc-badge-danger {
+  background-color: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+}
+.tmc-badge-neutral {
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-main);
+  color: var(--text-muted);
+}
+.tmc-text-primary { color: var(--text-primary); }
+.tmc-hover-primary:hover { color: var(--text-primary); }
+.tmc-text-secondary { color: var(--text-secondary); }
+.tmc-text-muted { color: var(--text-muted); }
+.tmc-text-faint { color: var(--text-faint); }
+.tmc-text-regex { color: var(--regex-text); }
+.tmc-border-t { border-top: 1px solid var(--border-soft); }
+.tmc-border-b { border-bottom: 1px solid var(--border-soft); }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.45); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.7); }
