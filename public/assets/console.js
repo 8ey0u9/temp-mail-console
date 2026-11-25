@@ -36,9 +36,38 @@
         status: {
           warnings: [],
           warningCodes: [],
+          adminSource: "env",
           retentionHours: 48,
+          retentionSource: "default",
           forwardEnabled: false,
+          forward: { enabled: false, email: "", source: "none", lastError: null },
+          apiToken: { configured: false, value: "", masked: "", source: "none" },
           whitelistBlocked: { count: 0, last: null }
+        },
+        settingsForm: {
+          forwardEnabled: false,
+          forwardEmail: "",
+          retentionHours: 48,
+          apiToken: "",
+          showApiToken: false,
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: ""
+        },
+        settingsState: {
+          savingForward: false,
+          forwardMsg: "",
+          forwardErr: "",
+          savingRetention: false,
+          retentionMsg: "",
+          retentionErr: "",
+          savingApiToken: false,
+          apiTokenMsg: "",
+          apiTokenErr: "",
+          apiTokenCopied: false,
+          savingAdminToken: false,
+          adminTokenMsg: "",
+          adminTokenErr: ""
         },
         activeTab: "emails",
         rulesView: "manage",
@@ -58,6 +87,8 @@
           this.loadTesterOptions();
         } else if (val === "whitelist") {
           this.loadStatus();
+        } else if (val === "settings" || val === "api") {
+          this.loadStatus({ syncSettings: val === "settings" });
         }
       },
       rulesView(val) {
@@ -103,7 +134,7 @@
     },
     mounted() {
       document.title = this.t("header.pageTitle");
-      this.loadStatus();
+      this.loadStatus({ syncSettings: true });
       this.loadList();
       this.loadRules();
       this.loadWhitelistData();
@@ -182,9 +213,148 @@
           return { ok: false, status: 0, message: this.t("common.networkError") };
         }
       },
-      async loadStatus() {
+      async loadStatus({ syncSettings = false } = {}) {
         const res = await this.requestApi("/admin/status");
-        if (res && res.ok) this.status = res.data;
+        if (res && res.ok) {
+          this.status = res.data;
+          if (syncSettings) this.syncSettingsFromStatus();
+        }
+      },
+      syncSettingsFromStatus() {
+        this.settingsForm.forwardEnabled = Boolean(this.status.forward?.enabled);
+        this.settingsForm.forwardEmail = this.status.forward?.email || "";
+        this.settingsForm.retentionHours = this.status.retentionHours || 48;
+        this.settingsForm.apiToken = this.status.apiToken?.value || "";
+      },
+      settingsSourceLabel(source) {
+        if (source === "db") return this.t("settings.sourceDb");
+        if (source === "env") return this.t("settings.sourceEnv");
+        if (source === "default") return this.t("settings.sourceDefault");
+        return this.t("settings.sourceUnset");
+      },
+      async saveForwardSettings() {
+        this.settingsState.forwardErr = "";
+        this.settingsState.forwardMsg = "";
+        this.settingsState.savingForward = true;
+        try {
+          const res = await this.requestApi("/admin/settings/forward", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enabled: this.settingsForm.forwardEnabled,
+              email: this.settingsForm.forwardEmail
+            })
+          });
+          if (!res) return;
+          if (!res.ok) {
+            this.settingsState.forwardErr = res.message;
+            return;
+          }
+          this.status.forward = res.data.forward;
+          this.status.forwardEnabled = res.data.forwardEnabled;
+          this.settingsState.forwardMsg = this.t("settings.savedForward");
+        } finally {
+          this.settingsState.savingForward = false;
+        }
+      },
+      async saveRetentionSettings() {
+        this.settingsState.retentionErr = "";
+        this.settingsState.retentionMsg = "";
+        this.settingsState.savingRetention = true;
+        try {
+          const res = await this.requestApi("/admin/settings/retention", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hours: Number(this.settingsForm.retentionHours) })
+          });
+          if (!res) return;
+          if (!res.ok) {
+            this.settingsState.retentionErr = res.message;
+            return;
+          }
+          this.status.retentionHours = res.data.retentionHours;
+          this.status.retentionSource = res.data.retentionSource;
+          this.settingsState.retentionMsg = this.t("settings.savedRetention");
+        } finally {
+          this.settingsState.savingRetention = false;
+        }
+      },
+      async saveApiTokenSettings(regenerate = false) {
+        this.settingsState.apiTokenErr = "";
+        this.settingsState.apiTokenMsg = "";
+        this.settingsState.savingApiToken = true;
+        try {
+          const res = await this.requestApi("/admin/settings/api-token", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(regenerate ? { regenerate: true } : { token: this.settingsForm.apiToken })
+          });
+          if (!res) return;
+          if (!res.ok) {
+            this.settingsState.apiTokenErr = res.message;
+            return;
+          }
+          this.status.apiToken = res.data.apiToken;
+          this.settingsForm.apiToken = res.data.apiToken.value || "";
+          if (regenerate) this.settingsForm.showApiToken = true;
+          this.settingsState.apiTokenMsg = this.t("settings.savedApiToken");
+          await this.loadStatus();
+        } finally {
+          this.settingsState.savingApiToken = false;
+        }
+      },
+      async copyApiToken() {
+        if (!this.settingsForm.apiToken) return;
+        try {
+          await navigator.clipboard.writeText(this.settingsForm.apiToken);
+          this.settingsState.apiTokenCopied = true;
+          setTimeout(() => { this.settingsState.apiTokenCopied = false; }, 2000);
+        } catch (err) {
+          console.error("Failed to copy:", err);
+        }
+      },
+      async saveAdminTokenSettings() {
+        this.settingsState.adminTokenErr = "";
+        this.settingsState.adminTokenMsg = "";
+        if (!this.settingsForm.currentPassword) {
+          this.settingsState.adminTokenErr = this.t("errors.WRONG_CURRENT_TOKEN");
+          return;
+        }
+        if (!this.settingsForm.newPassword) {
+          this.settingsState.adminTokenErr = this.t("errors.SECRET_REQUIRED");
+          return;
+        }
+        if (this.settingsForm.newPassword.length < 8) {
+          this.settingsState.adminTokenErr = this.t("errors.SECRET_TOO_SHORT", { min: 8 });
+          return;
+        }
+        if (this.settingsForm.newPassword !== this.settingsForm.confirmPassword) {
+          this.settingsState.adminTokenErr = this.t("settings.errPwdMismatch");
+          return;
+        }
+        this.settingsState.savingAdminToken = true;
+        try {
+          const res = await this.requestApi("/admin/settings/admin-token", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              current_password: this.settingsForm.currentPassword,
+              new_password: this.settingsForm.newPassword
+            })
+          });
+          if (!res) return;
+          if (!res.ok) {
+            this.settingsState.adminTokenErr = res.message;
+            return;
+          }
+          this.settingsForm.currentPassword = "";
+          this.settingsForm.newPassword = "";
+          this.settingsForm.confirmPassword = "";
+          this.settingsState.adminTokenMsg = this.t("settings.savedAdminToken");
+          await this.loadStatus();
+        } finally {
+          this.settingsState.savingAdminToken = false;
+        }
       },
       async loadTesterOptions() {
         const res = await this.requestApi("/admin/tester/options");
@@ -208,6 +378,8 @@
         } else if (this.activeTab === "whitelist") {
           this.loadWhitelistData();
           this.loadStatus();
+        } else if (this.activeTab === "settings" || this.activeTab === "api") {
+          this.loadStatus({ syncSettings: this.activeTab === "settings" });
         }
       },
       async loadList({ resetExpand = false } = {}) {

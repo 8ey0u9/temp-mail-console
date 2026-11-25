@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "0.3.5";
+export const ASSET_VERSION = "0.4.0";
 
 function renderBaseHead(title, { includeVue = false } = {}) {
   const v = ASSET_VERSION;
@@ -19,37 +19,49 @@ function renderBaseHead(title, { includeVue = false } = {}) {
   </head>`;
 }
 
-export function renderAuthHtml({ missingAdminToken = false, weakAdminToken = false } = {}) {
+export function renderAuthHtml({ setupMode = false, missingAdminToken = false, weakAdminToken = false } = {}) {
   const v = ASSET_VERSION;
-  return `<!DOCTYPE html>
-<html lang="zh" data-theme="dark">
-  ${renderBaseHead("Temp Mail Console - Login")}
-  <body class="antialiased flex items-center justify-center min-h-screen px-4 selection:bg-indigo-500/30">
-    <div class="fixed inset-0 tmc-glow pointer-events-none"></div>
-
-    <div class="fixed top-4 right-4 flex items-center gap-2 text-[11px] z-10">
-      <button id="theme-toggle" type="button" class="px-2.5 py-1.5 rounded-lg tmc-btn-ghost flex items-center gap-1.5 transition-colors"></button>
-      <button id="lang-toggle" type="button" class="px-2.5 py-1.5 rounded-lg tmc-btn-ghost font-medium transition-colors"></button>
-    </div>
-
-    <div class="w-full max-w-sm p-8 rounded-[1.5rem] tmc-card backdrop-blur-xl relative">
-      <div class="w-12 h-12 mb-6 flex border border-white/10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-inner shadow-white/20">
-        <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-      </div>
-      <h1 class="text-xl font-semibold tmc-text-primary tracking-tight mb-1" data-i18n="auth.heading">Temp Mail Console</h1>
-      ${
-        weakAdminToken
-          ? `<div class="mt-4 p-4 rounded-xl tmc-badge-danger text-[12px] space-y-2 leading-relaxed">
+  let bodyHtml = "";
+  if (setupMode) {
+    bodyHtml = `<p class="text-[13px] tmc-text-muted mb-6 leading-relaxed" data-i18n="auth.setupDesc">首次使用请设置管理员登录密码（至少 8 位且禁用默认弱口令），系统将自动为您生成随机 API_TOKEN。</p>
+      <form class="space-y-4" onsubmit="return false;">
+        <input
+          id="setup-token"
+          type="password"
+          class="w-full px-4 py-2.5 rounded-xl tmc-input transition-all text-[13px]"
+          placeholder="设置管理员密码 (至少 8 位)"
+          data-i18n-placeholder="auth.setupPlaceholder"
+          autocomplete="new-password"
+        />
+        <input
+          id="setup-token-confirm"
+          type="password"
+          class="w-full px-4 py-2.5 rounded-xl tmc-input transition-all text-[13px]"
+          placeholder="再次确认管理员密码"
+          data-i18n-placeholder="auth.setupConfirmPlaceholder"
+          autocomplete="new-password"
+        />
+        <div id="admin-error" class="text-[12px] tmc-badge-danger px-3 py-2 rounded-lg hidden"></div>
+        <button
+          id="setup-submit"
+          type="button"
+          class="w-full py-2.5 rounded-xl tmc-btn-primary font-medium text-[13px] transition-colors shadow-lg disabled:opacity-50"
+          data-i18n="auth.setupBtn"
+        >初始化并进入控制台</button>
+      </form>`;
+  } else if (weakAdminToken) {
+    bodyHtml = `<div class="mt-4 p-4 rounded-xl tmc-badge-danger text-[12px] space-y-2 leading-relaxed">
               <div class="font-semibold" data-i18n="auth.weakTitle">生产环境已禁用默认口令</div>
               <p data-i18n="auth.weakDesc">检测到当前 ADMIN_TOKEN 仍为默认弱口令，出于安全限制已禁止登录。请前往 Cloudflare Worker 的 Settings → Variables and Secrets 设置强密码，切勿将密钥写入公开仓库。</p>
-            </div>`
-          : missingAdminToken
-            ? `<div class="mt-4 p-4 rounded-xl tmc-badge-warn text-[12px] space-y-2 leading-relaxed">
+            </div>`;
+  } else if (missingAdminToken) {
+    bodyHtml = `<div class="mt-4 p-4 rounded-xl tmc-badge-warn text-[12px] space-y-2 leading-relaxed">
                 <div class="font-semibold" data-i18n="auth.missingTitle">尚未配置 ADMIN_TOKEN</div>
                 <p data-i18n="auth.missingLocal">本地开发请在项目根目录创建 .dev.vars 并设置 ADMIN_TOKEN。</p>
                 <p data-i18n="auth.missingProd">线上部署请在 Cloudflare Worker 的 Settings → Variables and Secrets 中配置，或执行 wrangler secret put ADMIN_TOKEN（切勿写入公开仓库的 wrangler.toml）。</p>
-              </div>`
-          : `<p class="text-[13px] tmc-text-muted mb-8" data-i18n="auth.subtitle">请输入管理员令牌以继续</p>
+              </div>`;
+  } else {
+    bodyHtml = `<p class="text-[13px] tmc-text-muted mb-8" data-i18n="auth.subtitle">请输入管理员令牌以继续</p>
       <form class="space-y-4" onsubmit="return false;">
         <input
           id="admin-token"
@@ -66,8 +78,26 @@ export function renderAuthHtml({ missingAdminToken = false, weakAdminToken = fal
           class="w-full py-2.5 rounded-xl tmc-btn-primary font-medium text-[13px] transition-colors shadow-lg disabled:opacity-50"
           data-i18n="auth.loginBtn"
         >安全登录</button>
-      </form>`
-      }
+      </form>`;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+  ${renderBaseHead("Temp Mail Console - Login")}
+  <body class="antialiased flex items-center justify-center min-h-screen px-4 selection:bg-indigo-500/30">
+    <div class="fixed inset-0 tmc-glow pointer-events-none"></div>
+
+    <div class="fixed top-4 right-4 flex items-center gap-2 text-[11px] z-10">
+      <button id="theme-toggle" type="button" class="px-2.5 py-1.5 rounded-lg tmc-btn-ghost flex items-center gap-1.5 transition-colors"></button>
+      <button id="lang-toggle" type="button" class="px-2.5 py-1.5 rounded-lg tmc-btn-ghost font-medium transition-colors"></button>
+    </div>
+
+    <div class="w-full max-w-sm p-8 rounded-[1.5rem] tmc-card backdrop-blur-xl relative">
+      <div class="w-12 h-12 mb-6 flex border border-white/10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-inner shadow-white/20">
+        <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+      </div>
+      <h1 class="text-xl font-semibold tmc-text-primary tracking-tight mb-1" data-i18n="${setupMode ? "auth.setupHeading" : "auth.heading"}">Temp Mail Console</h1>
+      ${bodyHtml}
     </div>
     <script src="/assets/i18n.js?v=${v}" defer></script>
     <script src="/assets/auth.js?v=${v}" defer></script>
@@ -92,7 +122,12 @@ export function renderHtml({ pageSize = 20, rulesPageSize = 12 } = {}) {
               <h1 class="text-lg font-semibold tracking-tight tmc-text-primary">{{ t('header.brandTitle') }}</h1>
               <p class="text-xs tmc-text-muted mt-0.5">
                 {{ t('header.brandSub', { hours: status.retentionHours }) }}
-                <span v-if="status.forwardEnabled" class="ml-1 text-emerald-500 font-medium">· {{ t('header.forwardEnabled') }}</span>
+                <button
+                  v-if="status.forwardEnabled"
+                  type="button"
+                  class="ml-1 text-emerald-500 font-medium hover:underline"
+                  @click="activeTab = 'settings'"
+                >· {{ t('header.forwardEnabled') }}</button>
               </p>
             </div>
           </div>
@@ -145,6 +180,11 @@ export function renderHtml({ pageSize = 20, rulesPageSize = 12 } = {}) {
             :class="activeTab === 'api' ? 'tmc-tab-active' : 'tmc-tab-idle'"
             @click="activeTab = 'api'"
           >{{ t('header.tabApi') }}</button>
+          <button
+            class="px-4 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-200"
+            :class="activeTab === 'settings' ? 'tmc-tab-active' : 'tmc-tab-idle'"
+            @click="activeTab = 'settings'"
+          >{{ t('header.tabSettings') }}</button>
         </div>
 
         <div v-if="globalError" class="p-3 rounded-xl tmc-badge-danger text-xs flex items-center justify-between">
@@ -591,6 +631,10 @@ export function renderHtml({ pageSize = 20, rulesPageSize = 12 } = {}) {
             <div class="space-y-2">
               <div class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('api.authTitle') }}</div>
               <pre class="rounded-xl tmc-code p-4 font-mono text-[12px]">Authorization: Bearer &lt;API_TOKEN&gt;</pre>
+              <p class="text-xs tmc-text-muted">
+                {{ status.apiToken?.source === 'db' ? t('api.authDbHint') : t('api.authEnvHint') }}
+                <button type="button" class="ml-1.5 text-indigo-400 hover:underline font-medium" @click="activeTab = 'settings'">{{ t('header.tabSettings') }}</button>
+              </p>
             </div>
             <div class="space-y-2">
               <div class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('api.latestTitle') }}</div>
@@ -614,6 +658,197 @@ Response: {
               <div class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('api.listTitle') }}</div>
               <pre class="rounded-xl tmc-code p-4 font-mono text-[12px] overflow-auto">GET /api/emails?address=&lt;email_address&gt;&amp;from=&lt;sender&gt;&amp;limit=20&amp;since=&lt;timestamp_ms&gt;&amp;only_matched=true
 GET /healthz  {{ t('api.healthComment') }}</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- 系统设置 -->
+        <section v-if="activeTab === 'settings'" class="space-y-6">
+          <div class="tmc-card rounded-2xl px-6 py-4 flex flex-wrap items-center justify-between gap-2 backdrop-blur-sm">
+            <div>
+              <h2 class="text-sm font-semibold tmc-text-primary">{{ t('settings.title') }}</h2>
+              <p class="text-[11px] tmc-text-faint mt-0.5">{{ t('settings.subtitle') }}</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 全局邮件转发 -->
+            <div class="tmc-card rounded-2xl p-6 space-y-4 backdrop-blur-sm">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <h3 class="text-sm font-semibold tmc-text-primary">{{ t('settings.forwardTitle') }}</h3>
+                  <p class="text-[11px] tmc-text-faint mt-0.5">{{ t('settings.forwardSub') }}</p>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[11px] shrink-0" :class="status.forward?.source === 'db' ? 'tmc-accent-box' : 'tmc-badge-neutral'">
+                  {{ settingsSourceLabel(status.forward?.source) }}
+                </span>
+              </div>
+              <form class="space-y-3" @submit.prevent="saveForwardSettings">
+                <label class="inline-flex items-center gap-2 text-xs tmc-text-secondary cursor-pointer select-none">
+                  <input v-model="settingsForm.forwardEnabled" type="checkbox" class="rounded border-slate-500 text-indigo-500 focus:ring-indigo-500" />
+                  {{ t('settings.forwardEnableLabel') }}
+                </label>
+                <div>
+                  <label class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('settings.forwardEmailLabel') }}</label>
+                  <input
+                    v-model.trim="settingsForm.forwardEmail"
+                    type="email"
+                    :placeholder="t('settings.forwardPlaceholder')"
+                    class="mt-1.5 w-full px-3.5 py-2 rounded-xl tmc-input text-[13px]"
+                  />
+                </div>
+                <p class="text-[11px] tmc-text-faint leading-relaxed">{{ t('settings.forwardHint') }}</p>
+                <div v-if="status.forward?.lastError" class="tmc-badge-danger px-3 py-2 rounded-lg text-[11px] leading-relaxed">
+                  {{ t('settings.forwardLastError', { time: formatTime(status.forward.lastError.at), message: status.forward.lastError.message }) }}
+                </div>
+                <div v-if="settingsState.forwardErr" class="tmc-badge-danger px-3 py-2 rounded-lg text-xs">{{ settingsState.forwardErr }}</div>
+                <div v-if="settingsState.forwardMsg" class="tmc-badge-success px-3 py-2 rounded-lg text-xs">{{ settingsState.forwardMsg }}</div>
+                <button
+                  type="submit"
+                  :disabled="settingsState.savingForward"
+                  class="px-4 py-2 rounded-xl tmc-btn-primary text-[13px] font-medium transition-colors disabled:opacity-50"
+                >{{ settingsState.savingForward ? t('common.saving') : t('settings.btnSaveForward') }}</button>
+              </form>
+            </div>
+
+            <!-- 邮件保留时长 -->
+            <div class="tmc-card rounded-2xl p-6 space-y-4 backdrop-blur-sm">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <h3 class="text-sm font-semibold tmc-text-primary">{{ t('settings.retentionTitle') }}</h3>
+                  <p class="text-[11px] tmc-text-faint mt-0.5">{{ t('settings.retentionSub') }}</p>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[11px] shrink-0" :class="status.retentionSource === 'db' ? 'tmc-accent-box' : 'tmc-badge-neutral'">
+                  {{ settingsSourceLabel(status.retentionSource) }}
+                </span>
+              </div>
+              <form class="space-y-3" @submit.prevent="saveRetentionSettings">
+                <div>
+                  <label class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('settings.retentionLabel') }}</label>
+                  <input
+                    v-model.number="settingsForm.retentionHours"
+                    type="number"
+                    min="1"
+                    max="8760"
+                    step="1"
+                    class="mt-1.5 w-full px-3.5 py-2 rounded-xl tmc-input text-[13px] font-mono"
+                  />
+                </div>
+                <div v-if="settingsState.retentionErr" class="tmc-badge-danger px-3 py-2 rounded-lg text-xs">{{ settingsState.retentionErr }}</div>
+                <div v-if="settingsState.retentionMsg" class="tmc-badge-success px-3 py-2 rounded-lg text-xs">{{ settingsState.retentionMsg }}</div>
+                <button
+                  type="submit"
+                  :disabled="settingsState.savingRetention"
+                  class="px-4 py-2 rounded-xl tmc-btn-primary text-[13px] font-medium transition-colors disabled:opacity-50"
+                >{{ settingsState.savingRetention ? t('common.saving') : t('settings.btnSaveRetention') }}</button>
+              </form>
+            </div>
+
+            <!-- 外部 API Token -->
+            <div class="tmc-card rounded-2xl p-6 space-y-4 backdrop-blur-sm">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <h3 class="text-sm font-semibold tmc-text-primary">{{ t('settings.apiTokenTitle') }}</h3>
+                  <p class="text-[11px] tmc-text-faint mt-0.5">{{ t('settings.apiTokenSub') }}</p>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[11px] shrink-0" :class="status.apiToken?.source === 'db' ? 'tmc-accent-box' : 'tmc-badge-neutral'">
+                  {{ settingsSourceLabel(status.apiToken?.source) }}
+                </span>
+              </div>
+              <div v-if="status.apiToken?.source === 'env'" class="tmc-badge-warn px-3 py-2 rounded-lg text-[11px] leading-relaxed">
+                {{ t('settings.apiTokenEnvNote', { masked: status.apiToken.masked }) }}
+              </div>
+              <form class="space-y-3" @submit.prevent="saveApiTokenSettings(false)">
+                <div class="flex items-center gap-2">
+                  <input
+                    v-model.trim="settingsForm.apiToken"
+                    :type="settingsForm.showApiToken ? 'text' : 'password'"
+                    :placeholder="t('settings.apiTokenPlaceholder')"
+                    class="flex-1 min-w-0 px-3.5 py-2 rounded-xl tmc-input text-[13px] font-mono"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    class="h-[38px] px-3 rounded-xl tmc-btn-ghost text-xs shrink-0"
+                    @click="settingsForm.showApiToken = !settingsForm.showApiToken"
+                  >{{ settingsForm.showApiToken ? t('settings.hideToken') : t('settings.showToken') }}</button>
+                  <button
+                    v-if="settingsForm.apiToken"
+                    type="button"
+                    class="h-[38px] px-3 rounded-xl tmc-accent-box text-xs shrink-0"
+                    @click="copyApiToken"
+                  >{{ settingsState.apiTokenCopied ? t('common.copied') : t('common.copy') }}</button>
+                </div>
+                <div v-if="settingsState.apiTokenErr" class="tmc-badge-danger px-3 py-2 rounded-lg text-xs">{{ settingsState.apiTokenErr }}</div>
+                <div v-if="settingsState.apiTokenMsg" class="tmc-badge-success px-3 py-2 rounded-lg text-xs">{{ settingsState.apiTokenMsg }}</div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    type="submit"
+                    :disabled="settingsState.savingApiToken"
+                    class="px-4 py-2 rounded-xl tmc-btn-primary text-[13px] font-medium transition-colors disabled:opacity-50"
+                  >{{ settingsState.savingApiToken ? t('common.saving') : t('settings.btnSaveApiToken') }}</button>
+                  <button
+                    type="button"
+                    :disabled="settingsState.savingApiToken"
+                    class="px-4 py-2 rounded-xl tmc-btn-ghost text-[13px] transition-colors disabled:opacity-50"
+                    @click="saveApiTokenSettings(true)"
+                  >{{ t('settings.btnRegenerate') }}</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- 管理员密码 -->
+            <div class="tmc-card rounded-2xl p-6 space-y-4 backdrop-blur-sm">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <h3 class="text-sm font-semibold tmc-text-primary">{{ t('settings.adminTokenTitle') }}</h3>
+                  <p class="text-[11px] tmc-text-faint mt-0.5">{{ t('settings.adminTokenSub') }}</p>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[11px] shrink-0" :class="status.adminSource === 'db' ? 'tmc-accent-box' : 'tmc-badge-neutral'">
+                  {{ settingsSourceLabel(status.adminSource) }}
+                </span>
+              </div>
+              <form class="space-y-3" @submit.prevent="saveAdminTokenSettings">
+                <div>
+                  <label class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('settings.currentPwdLabel') }}</label>
+                  <input
+                    v-model.trim="settingsForm.currentPassword"
+                    type="password"
+                    :placeholder="t('settings.currentPwdPlaceholder')"
+                    class="mt-1.5 w-full px-3.5 py-2 rounded-xl tmc-input text-[13px]"
+                    autocomplete="current-password"
+                  />
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('settings.newPwdLabel') }}</label>
+                    <input
+                      v-model.trim="settingsForm.newPassword"
+                      type="password"
+                      :placeholder="t('settings.newPwdPlaceholder')"
+                      class="mt-1.5 w-full px-3.5 py-2 rounded-xl tmc-input text-[13px]"
+                      autocomplete="new-password"
+                    />
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-medium tmc-text-faint uppercase tracking-widest">{{ t('settings.confirmPwdLabel') }}</label>
+                    <input
+                      v-model.trim="settingsForm.confirmPassword"
+                      type="password"
+                      :placeholder="t('settings.confirmPwdPlaceholder')"
+                      class="mt-1.5 w-full px-3.5 py-2 rounded-xl tmc-input text-[13px]"
+                      autocomplete="new-password"
+                    />
+                  </div>
+                </div>
+                <div v-if="settingsState.adminTokenErr" class="tmc-badge-danger px-3 py-2 rounded-lg text-xs">{{ settingsState.adminTokenErr }}</div>
+                <div v-if="settingsState.adminTokenMsg" class="tmc-badge-success px-3 py-2 rounded-lg text-xs">{{ settingsState.adminTokenMsg }}</div>
+                <button
+                  type="submit"
+                  :disabled="settingsState.savingAdminToken"
+                  class="px-4 py-2 rounded-xl tmc-btn-primary text-[13px] font-medium transition-colors disabled:opacity-50"
+                >{{ settingsState.savingAdminToken ? t('common.saving') : t('settings.btnSaveAdminToken') }}</button>
+              </form>
             </div>
           </div>
         </section>
