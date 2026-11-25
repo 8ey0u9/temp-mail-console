@@ -1,0 +1,5 @@
+# 本地开发环境变量模板（请复制为 .dev.vars 后使用，切勿提交到 Git）
+ADMIN_TOKEN=dev-admin-token
+API_TOKEN=dev-api-token
+FORWARD_TO=
+RETENTION_HOURS=48
