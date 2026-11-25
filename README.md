@@ -9,8 +9,8 @@
 - 🌐 **双语与双主题**：支持中文 / English 实时切换，以及深色 / 浅色双主题模式。
 - 🛡️ **发件人白名单**：基于正则表达式过滤发信人，支持启停控制与拦截统计；无启用规则时接收所有邮件。
 - 🖥️ **RESTful API**：支持按收件人、发件人（`from`）、时间游标（`since`）及命中状态查询结果。
-- 🔄 **转发与自动清理**：支持 `FORWARD_TO` 自动转发原件，Cron 每小时清理过期记录（默认保留 48 小时）。
-- ☁️ **边缘托管架构**：基于 Cloudflare Workers + D1 + Static Assets 部署，内置配置防泄露安全门禁。
+- ⚙️ **全界面配置与自动化**：转发邮箱、`API_TOKEN`、`ADMIN_TOKEN` 与保留时长均在「系统设置」实时调整，Cron 按设置自动清理过期记录。
+- ☁️ **零密钥文件部署**：基于 Cloudflare Workers + D1 + Static Assets，支持首次网页初始化管理员并自动生成 `API_TOKEN`，内置防泄露安全门禁。
 
 ## 界面预览
 
@@ -28,77 +28,42 @@
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/8ey0u9/temp-mail-console)
 
-> 点击上方按钮会引导授权 GitHub 并自动创建 D1 数据库、部署 Static Assets 与 Worker：
-> 1. **切勿将密钥或个人邮箱提交到公开 Fork 仓库**：请在安装向导提示中填入高强度 `ADMIN_TOKEN` 与 `API_TOKEN`（会自动加密写入 Cloudflare Workers Secrets，不会写入 Git），或部署后前往 Cloudflare Worker 的 **Settings -> Variables and Secrets** 配置 `ADMIN_TOKEN`、`API_TOKEN` 与可选的 `FORWARD_TO`。
-> 2. **Fork 仓库隐私保护（强烈建议）**：Cloudflare 仅要求模板源仓库为 Public，**一键部署完成后可在你自己的 GitHub 仓库 Settings 中改为 Private（私有）**，Workers Builds 仍可正常构建，避免公开暴露配置。
-> 3. **线上弱口令强阻断**：非 `localhost` 环境下若 `ADMIN_TOKEN` / `API_TOKEN` 未配置或仍为公开默认口令（`dev-admin-token` / `dev-api-token`），系统将直接拒绝登录和接口调用。
+> 无需修改任何密钥配置文件：点击上方按钮授权 GitHub 后会自动创建 D1 数据库、部署 Static Assets 与 Worker。
+> 1. **首次网页初始化**：部署完成后直接打开分配的域名，按引导设置管理员登录密码（系统会同时自动生成随机 `API_TOKEN`）。随后可在控制台 **「系统设置」** 随时管理转发邮箱、`API_TOKEN`、管理员密码与邮件保留时长（全部存于你的私有 D1 数据库）。
+> 2. **Fork 仓库建议**：Cloudflare 仅要求模板源仓库为 Public，**一键部署完成后可在你的 GitHub 仓库 Settings 中设为 Private（私有）**，Workers Builds 仍可正常构建。
 
 ---
 
-### 方式二：本地 CLI 部署（无需在 GitHub 创建公开 Fork，最安全）
+### 方式二：本地开发与 CLI 部署
 
-#### 1. 安装依赖
+#### 1. 安装依赖与本地启动
 
 ```bash
 npm install
+npm run dev   # 访问 http://localhost:8787，首次打开按网页引导初始化密码即可
 ```
 
-#### 2. 创建 D1 数据库（首次）
-
-```bash
-npx wrangler d1 create temp-email-db
-# 将输出的 UUID 填入 wrangler.toml 的 database_id 字段（无需提交密钥到仓库）
-```
-
-> 可选手动初始化表结构（系统首次运行时也会通过 `schema_meta` 自动完成幂等建表与增量版本迁移）：
+> 运行全部测试（单元测试 + i18n/UI 校验 + 打包预检 + Miniflare 集成测试）：
 > ```bash
-> npx wrangler d1 execute temp-email-db --remote --file=schema.sql
+> npm test
 > ```
-
-#### 3. 配置本地与生产环境变量
-
-- **本地开发**：复制 `.dev.vars.example` 为 `.dev.vars`（已在 `.gitignore` 中忽略，仅本地 `localhost` 允许使用默认口令 `dev-admin-token` / `dev-api-token`）：
-
-```bash
-cp .dev.vars.example .dev.vars
-```
-
-- **线上 Secrets（生产环境必配，切勿写入 `wrangler.toml`）**：
-
-```bash
-npx wrangler secret put ADMIN_TOKEN
-npx wrangler secret put API_TOKEN
-# 可选：自动转发目标邮箱（需在 Cloudflare Email Routing 中完成验证）
-npx wrangler secret put FORWARD_TO
-```
-
-- 非敏感参数可在 `wrangler.toml` 的 `[vars]` 中调整，如 `RETENTION_HOURS = "48"`。
-
-#### 4. 本地开发与自动化测试
-
-```bash
-# 启动本地开发服务（访问 http://localhost:8787）
-npm run dev
-
-# 运行全部测试（单元测试 + i18n与UI脚本校验 + 打包校验 + Miniflare/D1/Assets 全链路集成测试）
-npm test
-```
-
-> 本地调试 Email Handler 可使用仓库内置复杂测试夹具：
+> 本地调试 Email Handler 可使用内置测试夹具：
 > ```bash
 > curl -X POST "http://localhost:8787/cdn-cgi/handler/email?from=no-reply@acme-auth.io&to=alice.dev@yourdomain.com" \
 >   --data-binary @./test/fixtures/complex-magic-link.eml
 > ```
 
-#### 5. 安全校验与发布上线
-
-`npm run deploy` 已内置 `predeploy` 门禁（CI 亦默认运行 `--ci` 安全扫描）：会拦截意外写进 `wrangler.toml` 的密钥（`ADMIN_TOKEN`/`API_TOKEN`）、真实转发邮箱（`FORWARD_TO`）、弱默认口令以及缺失的 `database_id`（`--ci` 模式仅做防泄露检查），随后执行完整测试套件与打包检查：
+#### 2. 创建 D1 数据库并发布上线（手动 CLI 方式）
 
 ```bash
+npx wrangler d1 create temp-email-db
+# 将输出的 UUID 填入 wrangler.toml 的 database_id 字段后发布：
 npm run deploy
 ```
 
-部署完成后可请求 `GET https://<your-worker-domain>/healthz` 验证服务与 D1 连通性。
+> - 首次运行或访问会自动通过 `schema_meta` 完成幂等建表与版本迁移；无需手动填写任何环境变量配置文件。
+> - `npm run deploy` 已内置 `predeploy` 门禁（CI 同步运行 `--ci` 防泄露检查），防止意外将密钥或真实转发邮箱写进 `wrangler.toml`。
+> - 部署完成后可请求 `GET https://<your-worker-domain>/healthz` 验证服务连通性。
 
 ---
 
@@ -108,7 +73,7 @@ npm run deploy
 - 配置 **Catch-all address** 或具体的 **Custom addresses**，Destination 选择 `Send to a Worker` 并指向 `temp-email-worker`。
 
 > [!IMPORTANT]
-> 当动作设置为 **"Send to a Worker"** 时，Cloudflare 不会自动把邮件投递到你原本的个人收件箱。如既要提取规则数据又要接收原件，请配置 `FORWARD_TO`（需在 Email Routing 的 Destination addresses 中先完成验证）。
+> 当动作设置为 **"Send to a Worker"** 时，Cloudflare 不会自动投递到原个人收件箱。如需同时转发原件，请在控制台 **「系统设置 -> 全局邮件转发」** 开启并填写目标邮箱（需先在 Cloudflare Email Routing -> Destination addresses 完成验证）。
 
 ---
 
@@ -204,7 +169,6 @@ GET /healthz
 │   ├── sample.eml          # 基础测试邮件
 │   └── fixtures/           # 复杂场景测试夹具（Base64 / Quoted-Printable / 附件）
 ├── .github/workflows/ci.yml # GitHub Actions CI 自动校验
-├── .dev.vars.example        # 本地环境变量模板
 ├── schema.sql               # D1 建表语句
 └── wrangler.toml            # Wrangler 配置（含 Static Assets 与 Cron Triggers）
 ```
