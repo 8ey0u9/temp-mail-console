@@ -30,13 +30,16 @@
 
 ### 方式一：一键部署（推荐）
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/beyoug/temp-mail-console)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/8ey0u9/temp-mail-console)
 
-> 点击上方按钮可全自动 Fork 并在你的 Cloudflare 账户上部署该项目（自动分配 D1 数据库并部署静态资源）。部署后请在 Worker **Settings -> Variables and Secrets** 中配置 `ADMIN_TOKEN` 和 `API_TOKEN`（首次访问或收信会自动初始化并迁移 D1 表结构）。
+> 点击上方按钮会引导授权 GitHub 并自动创建 D1 数据库、部署 Static Assets 与 Worker：
+> 1. **切勿将密钥或个人邮箱提交到公开 Fork 仓库**：请在安装向导提示中填入高强度 `ADMIN_TOKEN` 与 `API_TOKEN`（会自动加密写入 Cloudflare Workers Secrets，不会写入 Git），或部署后前往 Cloudflare Worker 的 **Settings -> Variables and Secrets** 配置 `ADMIN_TOKEN`、`API_TOKEN` 与可选的 `FORWARD_TO`。
+> 2. **Fork 仓库隐私保护（强烈建议）**：Cloudflare 仅要求模板源仓库为 Public，**一键部署完成后可在你自己的 GitHub 仓库 Settings 中改为 Private（私有）**，Workers Builds 仍可正常构建，避免公开暴露配置。
+> 3. **线上弱口令强阻断**：非 `localhost` 环境下若 `ADMIN_TOKEN` / `API_TOKEN` 未配置或仍为公开默认口令（`dev-admin-token` / `dev-api-token`），系统将直接拒绝登录和接口调用。
 
 ---
 
-### 方式二：手动部署与发布流程
+### 方式二：本地 CLI 部署（无需在 GitHub 创建公开 Fork，最安全）
 
 #### 1. 安装依赖
 
@@ -48,7 +51,7 @@ npm install
 
 ```bash
 npx wrangler d1 create temp-email-db
-# 将输出的 database_id 填入 wrangler.toml（切勿将真实 ID 或密钥提交到公共仓库）
+# 将输出的 UUID 填入 wrangler.toml 的 database_id 字段（无需提交密钥到仓库）
 ```
 
 > 可选手动初始化表结构（系统首次运行时也会通过 `schema_meta` 自动完成幂等建表与增量版本迁移）：
@@ -58,13 +61,13 @@ npx wrangler d1 create temp-email-db
 
 #### 3. 配置本地与生产环境变量
 
-- **本地开发**：复制 `.dev.vars.example` 为 `.dev.vars`（已在 `.gitignore` 中忽略，默认口令为 `ADMIN_TOKEN=dev-admin-token`、`API_TOKEN=dev-api-token`）：
+- **本地开发**：复制 `.dev.vars.example` 为 `.dev.vars`（已在 `.gitignore` 中忽略，仅本地 `localhost` 允许使用默认口令 `dev-admin-token` / `dev-api-token`）：
 
 ```bash
 cp .dev.vars.example .dev.vars
 ```
 
-- **线上 Secrets（生产环境必配）**：
+- **线上 Secrets（生产环境必配，切勿写入 `wrangler.toml`）**：
 
 ```bash
 npx wrangler secret put ADMIN_TOKEN
@@ -93,7 +96,7 @@ npm test
 
 #### 5. 安全校验与发布上线
 
-`npm run deploy` 已内置 `predeploy` 门禁：发布前会自动校验 `wrangler.toml` 未遗留 `REPLACE_WITH_YOUR_D1_DATABASE_ID` 占位符或默认开发密码（如 `dev-admin-token` / `dev-api-token`），并执行完整测试套件与打包检查：
+`npm run deploy` 已内置 `predeploy` 门禁（CI 亦默认运行 `--ci` 安全扫描）：会拦截意外写进 `wrangler.toml` 的密钥（`ADMIN_TOKEN`/`API_TOKEN`）、真实转发邮箱（`FORWARD_TO`）、弱默认口令以及缺失的 `database_id`（`--ci` 模式仅做防泄露检查），随后执行完整测试套件与打包检查：
 
 ```bash
 npm run deploy
