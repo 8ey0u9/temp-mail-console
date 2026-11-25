@@ -63,10 +63,44 @@ import {
   parseResourceId,
   safeParseJson
 } from "./http.js";
-import { renderAuthHtml, renderHtml } from "./ui.js";
 
 const DEFAULT_RETENTION_HOURS = 48;
 const MAX_RETENTION_HOURS = 8760;
+
+async function checkAuthRateLimit(request, env) {
+  if (!env.AUTH_LIMITER) return null;
+  const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "local";
+  const { success } = await env.AUTH_LIMITER.limit({ key: `auth:${ip}` });
+  if (!success) {
+    return jsonError("请求过于频繁，请稍后再试", 429, {}, "RATE_LIMITED");
+  }
+  return null;
+}
+
+/**
+ * 基于 Static Assets 与 Cloudflare 原生 HTMLRewriter 按鉴权模式流式裁剪返回认证页面。
+ */
+async function serveStaticAuthHtml(request, env, mode = "login") {
+  const assetRes = await env.ASSETS.fetch(new Request(new URL("/auth.html", request.url)));
+  const rewritten = new HTMLRewriter()
+    .on("[data-auth-view]", {
+      element(el) {
+        if (el.getAttribute("data-auth-view") !== mode) el.remove();
+      }
+    })
+    .on("#auth-heading", {
+      element(el) {
+        if (mode === "setup") el.setAttribute("data-i18n", "auth.setupHeading");
+      }
+    })
+    .transform(assetRes);
+  return new Response(rewritten.body, { status: 200, headers: HTML_HEADERS });
+}
+
+async function serveConsoleHtml(request, env) {
+  const assetRes = await env.ASSETS.fetch(new Request(new URL("/console.html", request.url)));
+  return new Response(assetRes.body, { status: 200, headers: HTML_HEADERS });
+}
 
 /**
  * 解析环境变量 RETENTION_HOURS，非法或非正数时兜底为 48 小时。
@@ -232,26 +266,29 @@ async function handleFetch(request, env) {
       : handleApiEmailsList(url, env);
   }
 
+  // ── 防止直接访问静态壳页面 ────────────────────────────────────────────────
+  if (pathname === "/auth.html" || pathname === "/console.html") {
+    return Response.redirect(new URL("/", request.url).toString(), 302);
+  }
+
   // ── 控制台页面 (/) ────────────────────────────────────────────────────────
   if (pathname === "/") {
     await ensureSchema(env.DB);
     const settings = await getAllSystemSettings(env.DB);
     const adminCtx = resolveAdminMode(settings, env);
     if (adminCtx.mode === "setup") {
-      return new Response(renderAuthHtml({ setupMode: true }), { headers: HTML_HEADERS });
+      return serveStaticAuthHtml(request, env, "setup");
     }
     if (adminCtx.mode === "env") {
       const envState = getTokenSecurityState(adminCtx.envAdminToken, DEFAULT_ADMIN_TOKENS, request);
       if (envState === "weak") {
-        return new Response(renderAuthHtml({ weakAdminToken: true }), { headers: HTML_HEADERS });
+        return serveStaticAuthHtml(request, env, "weak");
       }
     }
     if (!(await isRequestAdminAuthorized(request, adminCtx))) {
-      return new Response(renderAuthHtml(), { headers: HTML_HEADERS });
+      return serveStaticAuthHtml(request, env, "login");
     }
-    return new Response(renderHtml({ pageSize: PAGE_SIZE, rulesPageSize: RULES_PAGE_SIZE }), {
-      headers: HTML_HEADERS
-    });
+    return serveConsoleHtml(request, env);
   }
 
   // ── 初始化 / 登录 / 登出端点 ────────────────────────────────────────────────
@@ -348,14 +385,22 @@ async function routeAdminRequest(pathname, method, url, request, env, context) {
 
 function parseApiFilterParams(url) {
   const address = String(url.searchParams.get("address") || "").trim();
-  if (!address) return { error: "address is required" };
+  if (!address) {
+    return { error: "address is required", address: "", since: null, onlyMatched: false, from: "" };
+  }
 
   const sinceRaw = url.searchParams.get("since");
   let since = null;
   if (sinceRaw !== null && sinceRaw !== "") {
     const parsedSince = Number(sinceRaw);
     if (!Number.isFinite(parsedSince) || parsedSince < 0) {
-      return { error: "since must be a valid timestamp in ms" };
+      return {
+        error: "since must be a valid timestamp in ms",
+        address: "",
+        since: null,
+        onlyMatched: false,
+        from: ""
+      };
     }
     since = Math.floor(parsedSince);
   }
@@ -364,7 +409,7 @@ function parseApiFilterParams(url) {
   const onlyMatched = onlyMatchedRaw === "true" || onlyMatchedRaw === "1";
   const from = String(url.searchParams.get("from") || "").trim();
 
-  return { address, since, onlyMatched, from };
+  return { error: "", address, since, onlyMatched, from };
 }
 
 function formatApiEmailRow(row) {
@@ -438,6 +483,9 @@ function checkTokenPolicy(token, defaultSet, request, { name, headers = {}, miss
 }
 
 async function handleAdminSetup(request, env) {
+  const limited = await checkAuthRateLimit(request, env);
+  if (limited) return limited;
+
   const settings = await getAllSystemSettings(env.DB);
   const adminCtx = resolveAdminMode(settings, env);
   if (adminCtx.mode !== "setup") {
@@ -453,11 +501,11 @@ async function handleAdminSetup(request, env) {
   });
   if (!check.ok) return jsonError(check.error, 400, {}, check.errorCode, check.errorMeta);
 
-  const { salt, hash } = await hashAdminPassword(check.value);
+  const { salt, hash, iterations } = await hashAdminPassword(check.value);
   const sessionSecret = randomHex(32);
   const inserted = await setAdminAuthConfig(
     env.DB,
-    { salt, hash, sessionSecret, updatedAt: Date.now() },
+    { salt, hash, iterations, sessionSecret, updatedAt: Date.now() },
     { onlyIfMissing: true }
   );
   if (!inserted) {
@@ -474,6 +522,9 @@ async function handleAdminSetup(request, env) {
 }
 
 async function handleAdminLogin(request, env) {
+  const limited = await checkAuthRateLimit(request, env);
+  if (limited) return limited;
+
   const settings = await getAllSystemSettings(env.DB);
   const adminCtx = resolveAdminMode(settings, env);
   if (adminCtx.mode === "setup") {
@@ -635,9 +686,9 @@ async function handleAdminSettingsAdminToken(request, env, adminCtx) {
   });
   if (!check.ok) return jsonError(check.error, 400, {}, check.errorCode, check.errorMeta);
 
-  const { salt, hash } = await hashAdminPassword(check.value);
+  const { salt, hash, iterations } = await hashAdminPassword(check.value);
   const sessionSecret = randomHex(32);
-  await setAdminAuthConfig(env.DB, { salt, hash, sessionSecret, updatedAt: Date.now() });
+  await setAdminAuthConfig(env.DB, { salt, hash, iterations, sessionSecret, updatedAt: Date.now() });
 
   const sessionToken = await signSessionToken(sessionSecret);
   return json({ ok: true, adminSource: "db" }, 200, {

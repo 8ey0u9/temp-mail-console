@@ -13,8 +13,11 @@ export function constantTimeEqual(a, b) {
   const bBytes = textEncoder.encode(b);
   if (aBytes.length !== bBytes.length) return false;
 
-  if (typeof globalThis.crypto?.subtle?.timingSafeEqual === "function") {
-    return globalThis.crypto.subtle.timingSafeEqual(aBytes, bBytes);
+  const subtle = /** @type {SubtleCrypto & { timingSafeEqual?: (a: BufferSource, b: BufferSource) => boolean }} */ (
+    globalThis.crypto?.subtle
+  );
+  if (typeof subtle?.timingSafeEqual === "function") {
+    return subtle.timingSafeEqual(aBytes, bBytes);
   }
 
   let diff = 0;
@@ -114,7 +117,8 @@ export function getTokenSecurityState(token, defaultSet, request) {
 
 export const MIN_SECRET_LENGTH = 8;
 export const MAX_SECRET_LENGTH = 256;
-const PBKDF2_ITERATIONS = 100000;
+// 适配 Cloudflare Workers Free 套餐 10ms CPU 上限；边缘限流 AUTH_LIMITER 负责防在线爆破
+export const PBKDF2_ITERATIONS = 20000;
 
 function bytesToHex(bytes) {
   let out = "";
@@ -141,9 +145,13 @@ export function randomHex(byteLength = 16) {
 }
 
 /**
- * 使用 PBKDF2-SHA256 对管理员口令进行加盐哈希。
+ * 使用 PBKDF2-SHA256 对管理员口令进行加盐哈希，并记录迭代次数以便向后兼容。
  */
-export async function hashAdminPassword(password, saltHex = randomHex(16)) {
+export async function hashAdminPassword(
+  password,
+  saltHex = randomHex(16),
+  iterations = PBKDF2_ITERATIONS
+) {
   const saltBytes = hexToBytes(saltHex);
   if (!saltBytes) throw new Error("Invalid salt hex");
   const key = await globalThis.crypto.subtle.importKey(
@@ -154,18 +162,19 @@ export async function hashAdminPassword(password, saltHex = randomHex(16)) {
     ["deriveBits"]
   );
   const bits = await globalThis.crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
     key,
     256
   );
-  return { salt: saltHex, hash: bytesToHex(new Uint8Array(bits)) };
+  return { salt: saltHex, hash: bytesToHex(new Uint8Array(bits)), iterations };
 }
 
 export async function verifyAdminPassword(candidate, adminAuth) {
   if (!adminAuth?.salt || !adminAuth?.hash) return false;
   const input = String(candidate || "");
   if (!input) return false;
-  const derived = await hashAdminPassword(input, adminAuth.salt);
+  const iterations = Number(adminAuth.iterations) > 0 ? Number(adminAuth.iterations) : 100000;
+  const derived = await hashAdminPassword(input, adminAuth.salt, iterations);
   return constantTimeEqual(derived.hash, adminAuth.hash);
 }
 
@@ -203,8 +212,11 @@ export async function verifySessionToken(token, sessionSecret) {
 
 /**
  * 校验管理请求鉴权：优先验证 D1 admin_auth（签名 Cookie 或 Bearer 口令），未初始化时回退环境变量。
+ * @param {Request} request
+ * @param {{ adminAuth?: any, envAdminToken?: string }} [options]
  */
-export async function isRequestAdminAuthorized(request, { adminAuth, envAdminToken } = {}) {
+export async function isRequestAdminAuthorized(request, options = {}) {
+  const { adminAuth, envAdminToken } = options;
   if (adminAuth?.hash && adminAuth?.sessionSecret) {
     const cookies = parseCookies(request.headers.get("Cookie") || "");
     if (await verifySessionToken(cookies[ADMIN_COOKIE_NAME] || "", adminAuth.sessionSecret)) {

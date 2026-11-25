@@ -18,89 +18,22 @@ const SCHEMA_STATEMENTS = [
   "CREATE TABLE IF NOT EXISTS whitelist (id INTEGER PRIMARY KEY AUTOINCREMENT, sender_pattern TEXT NOT NULL, remark TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)"
 ];
 
-const CURRENT_SCHEMA_VERSION = 3;
 const schemaReadyByDb = new WeakMap();
 
-async function getTableColumns(db, tableName) {
-  const result = await db.prepare(`PRAGMA table_info(${tableName})`).all();
-  return new Set((result.results || []).map((row) => String(row.name)));
-}
-
-async function migrateSchemaIfNeeded(db) {
-  const versionRow = await db
-    .prepare("SELECT value FROM schema_meta WHERE key = 'version'")
-    .first();
-  const currentVersion = Number(versionRow?.value || 0);
-  if (currentVersion >= CURRENT_SCHEMA_VERSION) return;
-
-  const [emailCols, ruleCols, whitelistCols] = await Promise.all([
-    getTableColumns(db, "emails"),
-    getTableColumns(db, "rules"),
-    getTableColumns(db, "whitelist")
-  ]);
-
-  const migrations = [];
-  if (!emailCols.has("text_preview")) {
-    migrations.push("ALTER TABLE emails ADD COLUMN text_preview TEXT NOT NULL DEFAULT ''");
-  }
-  if (!ruleCols.has("match_target")) {
-    migrations.push("ALTER TABLE rules ADD COLUMN match_target TEXT NOT NULL DEFAULT 'body'");
-  }
-  if (!ruleCols.has("enabled")) {
-    migrations.push("ALTER TABLE rules ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
-  }
-  if (!whitelistCols.has("remark")) {
-    migrations.push("ALTER TABLE whitelist ADD COLUMN remark TEXT");
-  }
-  if (!whitelistCols.has("enabled")) {
-    migrations.push("ALTER TABLE whitelist ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
-  }
-
-  if (migrations.length > 0) {
-    await db.batch(migrations.map((sql) => db.prepare(sql)));
-  }
-
-  // 为升级前的历史邮件补全收件人索引表
-  const [recipientCount, emailRows] = await db.batch([
-    db.prepare("SELECT COUNT(1) as cnt FROM email_recipients"),
-    db.prepare("SELECT id, to_address, received_at FROM emails")
-  ]);
-  const hasRecipients = Number(recipientCount?.results?.[0]?.cnt || 0) > 0;
-  const existingEmails = emailRows?.results || [];
-
-  if (!hasRecipients && existingEmails.length > 0) {
-    const backfillStatements = [];
-    for (const row of existingEmails) {
-      const addresses = extractUniqueAddresses(String(row.to_address || "").split(","));
-      for (const recipient of addresses) {
-        backfillStatements.push(
-          db.prepare("INSERT INTO email_recipients (email_id, recipient, received_at) VALUES (?, ?, ?)")
-            .bind(row.id, recipient, row.received_at)
-        );
-      }
-    }
-    for (let i = 0; i < backfillStatements.length; i += 50) {
-      await db.batch(backfillStatements.slice(i, i + 50));
-    }
-  }
-
-  await db
-    .prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)")
-    .bind(String(CURRENT_SCHEMA_VERSION))
-    .run();
-}
-
+/**
+ * 极简空库防呆保障：标准流程由 D1 migrations/0001_init.sql 建表，
+ * 运行时保留轻量的 IF NOT EXISTS 检查，确保一键部署未触发迁移脚本时仍可开箱即用。
+ */
 export async function ensureSchema(db) {
   let promise = schemaReadyByDb.get(db);
   if (!promise) {
-    promise = (async () => {
-      await db.batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)));
-      await migrateSchemaIfNeeded(db);
-    })().catch((err) => {
-      schemaReadyByDb.delete(db);
-      console.error("Schema initialization failed:", err);
-      throw err;
-    });
+    promise = db
+      .batch(SCHEMA_STATEMENTS.map((statement) => db.prepare(statement)))
+      .catch((err) => {
+        schemaReadyByDb.delete(db);
+        console.error("Schema initialization failed:", err);
+        throw err;
+      });
     schemaReadyByDb.set(db, promise);
   }
   return promise;
@@ -191,6 +124,7 @@ export async function queryEmailsForApi(
 ) {
   const targetAddress = normalizeEmailAddress(address);
   const conditions = ["er.recipient = ?"];
+  /** @type {(string | number)[]} */
   const params = [targetAddress];
 
   const trimmedFrom = normalizeEmailAddress(from);
