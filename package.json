@@ -5,18 +5,27 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "build:assets": "cp node_modules/vue/dist/vue.global.prod.js public/assets/vue.global.prod.js && tailwindcss -i scripts/tailwind.css -o public/assets/app.css --minify",
+    "build": "npm run build:assets && wrangler deploy --dry-run --outdir dist",
+    "db:migrate": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "test:unit": "node --test test/unit.test.js test/ui-syntax.test.js",
     "test:integration": "npm run build && node --test test/integration.test.js",
     "test": "npm run test:unit && npm run test:integration",
-    "check": "npm test",
+    "check": "npm run typecheck && npm test",
     "predeploy": "node scripts/predeploy-check.mjs && npm run check",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy"
   },
   "dependencies": {
     "postal-mime": "^2.4.2"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.5",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vue": "^3.5.46",
     "wrangler": "^4.72.0"
   }
 }
