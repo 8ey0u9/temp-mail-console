@@ -1,0 +1,35 @@
+From: Acme Cloud Security <NoReply@AcmeCloud.com>
+To: Ops <ops@yourdomain.com>, Audit <Audit@YourDomain.COM>
+Subject: =?UTF-8?B?W0FjbWVDbG91ZF0g5Yqo5oCB55m75b2V5Y+j5Luk77yaSzlNNC1YN1Ay77yINeWIhumSn+WGheacieaViO+8iQ==?=
+Message-ID: <complex-mixed-attach-002@acmecloud.com>
+Date: Wed, 25 Nov 2026 12:31:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mix-outer-002"
+
+--mix-outer-002
+Content-Type: multipart/alternative; boundary="alt-inner-002"
+
+--alt-inner-002
+Content-Type: text/plain; charset="UTF-8"
+
+尊敬的管理员：关联工单编号：102938。请使用邮件标题中的动态口令完成验证。
+
+--alt-inner-002
+Content-Type: text/html; charset="UTF-8"
+
+<html><body>
+  <p>尊敬的管理员：</p>
+  <p>系统检测到一次新的控制台登录请求，关联工单编号：<span>102938</span>。</p>
+  <p>请使用邮件标题中的动态口令完成验证，操作详情见附件审计摘要。</p>
+</body></html>
+
+--alt-inner-002--
+
+--mix-outer-002
+Content-Type: text/plain; charset="UTF-8"; name="audit-log.txt"
+Content-Disposition: attachment; filename="audit-log.txt"
+Content-Transfer-Encoding: base64
+
+cmVxdWVzdF9pZD1yZXFfOTkxMgppcD0yMDMuMC4xMTMuNDIKcmVnaW9uPWFwLWVhc3QtMQo=
+
+--mix-outer-002--

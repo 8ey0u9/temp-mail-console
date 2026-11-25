@@ -1,0 +1,25 @@
+From: Security <Security@Example.COM>
+To: DemoUser <DemoUser@YourDomain.COM>, Backup <backup@yourdomain.com>
+Subject: [Service] Your code is 849201
+Message-ID: <html-multipart-001@example.com>
+Date: Fri, 13 Mar 2026 10:05:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary-123"
+
+--boundary-123
+Content-Type: text/plain; charset="UTF-8"
+
+Please view this email in a modern HTML email client.
+
+--boundary-123
+Content-Type: text/html; charset="UTF-8"
+
+<html>
+  <head><style>.hidden { color: #999999; }</style></head>
+  <body>
+    <div>Hello,</div>
+    <p>Your verification code is: <strong>849201</strong>.</p>
+    <p>Valid for 10 minutes.</p>
+  </body>
+</html>
+--boundary-123--

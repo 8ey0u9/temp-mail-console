@@ -1,0 +1,32 @@
+From: Acme Auth <no-reply@acme-auth.io>
+To: Alice <Alice.Dev@YourDomain.COM>
+Subject: =?UTF-8?B?W0FjbWVdIOivt+WujOaIkOeZu+W9lemqjOivge+8iOWGheWQq+WuieWFqOagoemqjOeggeS4jumtlOazlemTvuaOpe+8iQ==?=
+Message-ID: <complex-magic-link-001@acme-auth.io>
+Date: Wed, 25 Nov 2026 12:30:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-magic-001"
+
+--alt-magic-001
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: 8bit
+
+Please open this email in an HTML-capable client to click the login button.
+
+--alt-magic-001
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: base64
+
+PCFET0NUWVBFIGh0bWw+CjxodG1sPgo8aGVhZD4KICA8bWV0YSBjaGFyc2V0PSJ1dGYtOCIgLz4K
+ICA8c3R5bGU+CiAgICAuYnRuIHsgYmFja2dyb3VuZC1jb2xvcjogIzY1NDMyMTsgY29sb3I6ICNm
+ZmZmZmY7IHBhZGRpbmc6IDEycHggMjRweDsgfQogICAgLm11dGVkIHsgY29sb3I6ICM4ODg4ODg7
+IGZvbnQtc2l6ZTogMTJweDsgfQogIDwvc3R5bGU+CjwvaGVhZD4KPGJvZHk+CiAgPCEtLSBpbnRl
+cm5hbCByZWY6IDExMjIzMyAtLT4KICA8aDI+QWNtZSBBdXRoIOeZu+W9leehruiupDwvaDI+CiAg
+PHA+5oKo5aW977yM5oKo55qE5a6J5YWo5qCh6aqM56CB77yaPHN0cm9uZz43MzkyMDQ8L3N0cm9u
+Zz7vvIgxMCDliIbpkp/lhoXmnInmlYjvvInjgII8L3A+CiAgPHA+5oKo5Lmf5Y+v5Lul55u05o6l
+54K55Ye75LiL5pa55oyJ6ZKu5LiA6ZSu55m75b2V77yaPC9wPgogIDxwPjxhIGNsYXNzPSJidG4i
+IGhyZWY9Imh0dHBzOi8vYXV0aC5hY21lLWF1dGguaW8vbWFnaWM/dG9rZW49dGtfbGl2ZV85Zjhh
+N2I2YzVkJnJlZGlyZWN0PSUyRmNvbnNvbGUiPueri+WNs+eZu+W9leaOp+WItuWPsDwvYT48L3A+
+CiAgPHAgY2xhc3M9Im11dGVkIj7CqSAyMDI2IEFjbWUgQXV0aCBJbmMuIOWmgumdnuacrOS6uuaT
+jeS9nOivt+W/veeVpeOAgjwvcD4KPC9ib2R5Pgo8L2h0bWw+
+
+--alt-magic-001--
