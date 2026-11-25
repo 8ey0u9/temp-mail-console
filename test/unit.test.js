@@ -5,8 +5,10 @@ import {
   buildSessionCookie,
   constantTimeEqual,
   getBearerToken,
+  getTokenSecurityState,
   isAdminAuthorized,
   isApiAuthorized,
+  isLocalDevRequest,
   isWeakOrMissingToken,
   DEFAULT_ADMIN_TOKENS,
   parseCookies
@@ -63,6 +65,15 @@ test("constantTimeEqual and authorization helpers work correctly", () => {
   assert.equal(isWeakOrMissingToken("dev-admin-token", DEFAULT_ADMIN_TOKENS), true);
   assert.equal(isWeakOrMissingToken("", DEFAULT_ADMIN_TOKENS), true);
   assert.equal(isWeakOrMissingToken("strong-random-token", DEFAULT_ADMIN_TOKENS), false);
+
+  const localReq = new Request("http://localhost:8787/");
+  const prodReq = new Request("https://mail.example.com/");
+  assert.equal(isLocalDevRequest(localReq), true);
+  assert.equal(isLocalDevRequest(prodReq), false);
+  assert.equal(getTokenSecurityState("", DEFAULT_ADMIN_TOKENS, localReq), "missing");
+  assert.equal(getTokenSecurityState("dev-admin-token", DEFAULT_ADMIN_TOKENS, localReq), "ok");
+  assert.equal(getTokenSecurityState("dev-admin-token", DEFAULT_ADMIN_TOKENS, prodReq), "weak");
+  assert.equal(getTokenSecurityState("strong-random-token", DEFAULT_ADMIN_TOKENS, prodReq), "ok");
 });
 
 test("stripHtmlToText removes tags/scripts/styles and decodes entities", () => {

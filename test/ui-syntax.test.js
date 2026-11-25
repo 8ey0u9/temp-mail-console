@@ -64,6 +64,11 @@ test("rendered HTML shells reference versioned static assets and contain no inli
   const missingTokenHtml = renderAuthHtml({ missingAdminToken: true });
   assert.match(missingTokenHtml, /ADMIN_TOKEN/);
   assert.match(missingTokenHtml, new RegExp(`/assets/auth\\.js\\?v=${ASSET_VERSION}`));
+  assert.doesNotMatch(missingTokenHtml, /<form/);
+
+  const weakTokenHtml = renderAuthHtml({ weakAdminToken: true });
+  assert.match(weakTokenHtml, /auth\.weakTitle/);
+  assert.doesNotMatch(weakTokenHtml, /<form/);
 
   const consoleHtml = renderHtml({ pageSize: 20, rulesPageSize: 12 });
   assert.match(consoleHtml, /v-cloak/);

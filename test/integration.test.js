@@ -574,3 +574,57 @@ test("complex email scenarios: Base64 magic link, nested attachment with subject
     await mf.dispose();
   }
 });
+
+test("production domains reject default weak tokens while localhost allows local dev defaults", async () => {
+  const mf = createMiniflare({
+    ADMIN_TOKEN: "dev-admin-token",
+    API_TOKEN: "dev-api-token"
+  });
+  try {
+    // Public domain should block login page form, /admin/login, /admin/*, and /api/*
+    const prodHome = await mf.dispatchFetch("https://mail-demo.workers.dev/");
+    assert.equal(prodHome.status, 200);
+    const prodHomeHtml = await prodHome.text();
+    assert.match(prodHomeHtml, /auth\.weakTitle/);
+    assert.doesNotMatch(prodHomeHtml, /<form/);
+
+    const prodLogin = await mf.dispatchFetch("https://mail-demo.workers.dev/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "dev-admin-token" })
+    });
+    assert.equal(prodLogin.status, 503);
+    assert.equal((await prodLogin.json()).errorCode, "WEAK_ADMIN_TOKEN");
+
+    const prodApi = await mf.dispatchFetch(
+      "https://mail-demo.workers.dev/api/emails/latest?address=test@example.com",
+      { headers: { Authorization: "Bearer dev-api-token" } }
+    );
+    assert.equal(prodApi.status, 503);
+    assert.equal((await prodApi.json()).errorCode, "WEAK_API_TOKEN");
+
+    // Localhost should still allow default dev tokens for local development
+    const localLogin = await mf.dispatchFetch("http://localhost/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "dev-admin-token" })
+    });
+    assert.equal(localLogin.status, 200);
+    const localCookie = localLogin.headers.get("set-cookie").split(";")[0];
+
+    const prodAdminWithLocalCookie = await mf.dispatchFetch("https://mail-demo.workers.dev/admin/status", {
+      headers: { Cookie: localCookie }
+    });
+    assert.equal(prodAdminWithLocalCookie.status, 503);
+    assert.equal((await prodAdminWithLocalCookie.json()).errorCode, "WEAK_ADMIN_TOKEN");
+
+    const localStatus = await mf.dispatchFetch("http://localhost/admin/status", {
+      headers: { Cookie: localCookie }
+    });
+    assert.equal(localStatus.status, 200);
+    const localStatusJson = await localStatus.json();
+    assert.ok(localStatusJson.data.warningCodes.includes("default_admin_token"));
+  } finally {
+    await mf.dispose();
+  }
+});
