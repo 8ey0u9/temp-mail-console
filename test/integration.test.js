@@ -628,3 +628,168 @@ test("production domains reject default weak tokens while localhost allows local
     await mf.dispose();
   }
 });
+
+test("zero-config first-run setup and dynamic UI settings manage admin password, API token, forwarding, and retention", async () => {
+  const mf = createMiniflare({
+    ADMIN_TOKEN: "",
+    API_TOKEN: "",
+    FORWARD_TO: "",
+    RETENTION_HOURS: ""
+  });
+  try {
+    // 1. Fresh instance renders first-run setup page even on public domain
+    const setupPage = await mf.dispatchFetch("https://mail-fresh.workers.dev/");
+    assert.equal(setupPage.status, 200);
+    assert.match(await setupPage.text(), /setup-token/);
+
+    // 2. Reject weak/short password on setup, accept strong password, and lock setup permanently
+    const badSetup = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "dev-admin-token" })
+    });
+    assert.equal(badSetup.status, 400);
+    assert.equal((await badSetup.json()).errorCode, "DISALLOWED_DEFAULT_SECRET");
+
+    const okSetup = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "MyStrongPass#2026" })
+    });
+    assert.equal(okSetup.status, 200);
+    const firstCookie = okSetup.headers.get("set-cookie").split(";")[0];
+    assert.doesNotMatch(firstCookie, /MyStrongPass#2026/, "session cookie must be HMAC-signed, not plaintext password");
+
+    const secondSetup = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "AnotherPass#9999" })
+    });
+    assert.equal(secondSetup.status, 409);
+    assert.equal((await secondSetup.json()).errorCode, "ALREADY_INITIALIZED");
+
+    // 3. Verify auto-generated API token & default retention in /admin/status
+    const statusRes = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/status", {
+      headers: { Cookie: firstCookie }
+    });
+    assert.equal(statusRes.status, 200);
+    const statusData = (await statusRes.json()).data;
+    assert.equal(statusData.adminSource, "db");
+    assert.equal(statusData.retentionHours, 48);
+    assert.equal(statusData.apiToken.source, "db");
+    assert.equal(statusData.apiToken.value.length, 32);
+    const firstApiToken = statusData.apiToken.value;
+
+    // 4. Update retention hours to 72h and verify Cron respects D1 retention setting
+    const badRet = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/settings/retention", {
+      method: "PUT",
+      headers: { Cookie: firstCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ hours: 0 })
+    });
+    assert.equal(badRet.status, 400);
+    assert.equal((await badRet.json()).errorCode, "INVALID_RETENTION_HOURS");
+
+    const okRet = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/settings/retention", {
+      method: "PUT",
+      headers: { Cookie: firstCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ hours: 72 })
+    });
+    assert.equal(okRet.status, 200);
+    assert.equal((await okRet.json()).data.retentionHours, 72);
+
+    const db = await mf.getD1Database("DB");
+    const keepTime = Date.now() - 50 * 60 * 60 * 1000;
+    const dropTime = Date.now() - 80 * 60 * 60 * 1000;
+    await db
+      .prepare("INSERT INTO emails (message_id, from_address, to_address, subject, extracted_json, text_preview, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind("keep-50h", "a@example.com", "u@yourdomain.com", "Keep", "[]", "keep", keepTime)
+      .run();
+    await db
+      .prepare("INSERT INTO emails (message_id, from_address, to_address, subject, extracted_json, text_preview, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind("drop-80h", "a@example.com", "u@yourdomain.com", "Drop", "[]", "drop", dropTime)
+      .run();
+
+    const worker = await mf.getWorker("temp-email-worker");
+    await worker.scheduled({ cron: "0 * * * *" });
+    const keepRow = await db.prepare("SELECT COUNT(1) as cnt FROM emails WHERE message_id = 'keep-50h'").first();
+    const dropRow = await db.prepare("SELECT COUNT(1) as cnt FROM emails WHERE message_id = 'drop-80h'").first();
+    assert.equal(Number(keepRow.cnt), 1);
+    assert.equal(Number(dropRow.cnt), 0);
+
+    // 5. Update forward settings & validate email format
+    const badFwd = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/settings/forward", {
+      method: "PUT",
+      headers: { Cookie: firstCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, email: "not-an-email" })
+    });
+    assert.equal(badFwd.status, 400);
+    assert.equal((await badFwd.json()).errorCode, "INVALID_FORWARD_EMAIL");
+
+    const okFwd = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/settings/forward", {
+      method: "PUT",
+      headers: { Cookie: firstCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, email: "Receiver@Example.COM" })
+    });
+    assert.equal(okFwd.status, 200);
+    const okFwdJson = await okFwd.json();
+    assert.equal(okFwdJson.data.forwardEnabled, true);
+    assert.equal(okFwdJson.data.forward.email, "receiver@example.com");
+
+    // 6. Regenerate API token -> old token fails 401, new token succeeds 200
+    const regenApi = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/settings/api-token", {
+      method: "PUT",
+      headers: { Cookie: firstCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ regenerate: true })
+    });
+    assert.equal(regenApi.status, 200);
+    const secondApiToken = (await regenApi.json()).data.apiToken.value;
+    assert.notEqual(secondApiToken, firstApiToken);
+
+    const oldApiCall = await mf.dispatchFetch(
+      "https://mail-fresh.workers.dev/api/emails/latest?address=none@yourdomain.com",
+      { headers: { Authorization: `Bearer ${firstApiToken}` } }
+    );
+    assert.equal(oldApiCall.status, 401);
+    const newApiCall = await mf.dispatchFetch(
+      "https://mail-fresh.workers.dev/api/emails/latest?address=none@yourdomain.com",
+      { headers: { Authorization: `Bearer ${secondApiToken}` } }
+    );
+    assert.equal(newApiCall.status, 404);
+
+    // 7. Update admin password -> rotates sessionSecret, invalidates old cookie, accepts new password
+    const badCurrPwd = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/settings/admin-token", {
+      method: "PUT",
+      headers: { Cookie: firstCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: "wrong", new_password: "BrandNewPass#9999" })
+    });
+    assert.equal(badCurrPwd.status, 401);
+    assert.equal((await badCurrPwd.json()).errorCode, "WRONG_CURRENT_TOKEN");
+
+    const okPwd = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/settings/admin-token", {
+      method: "PUT",
+      headers: { Cookie: firstCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: "MyStrongPass#2026", new_password: "BrandNewPass#9999" })
+    });
+    assert.equal(okPwd.status, 200);
+    const secondCookie = okPwd.headers.get("set-cookie").split(";")[0];
+
+    const staleSessionRes = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/status", {
+      headers: { Cookie: firstCookie }
+    });
+    assert.equal(staleSessionRes.status, 401);
+
+    const freshSessionRes = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/status", {
+      headers: { Cookie: secondCookie }
+    });
+    assert.equal(freshSessionRes.status, 200);
+
+    const newLoginRes = await mf.dispatchFetch("https://mail-fresh.workers.dev/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "BrandNewPass#9999" })
+    });
+    assert.equal(newLoginRes.status, 200);
+  } finally {
+    await mf.dispose();
+  }
+});

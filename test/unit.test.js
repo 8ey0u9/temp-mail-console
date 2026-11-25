@@ -6,10 +6,15 @@ import {
   constantTimeEqual,
   getBearerToken,
   getTokenSecurityState,
+  hashAdminPassword,
   isAdminAuthorized,
   isApiAuthorized,
   isLocalDevRequest,
   isWeakOrMissingToken,
+  signSessionToken,
+  validateSecretValue,
+  verifyAdminPassword,
+  verifySessionToken,
   DEFAULT_ADMIN_TOKENS,
   parseCookies
 } from "../src/auth.js";
@@ -20,6 +25,7 @@ import {
   senderInWhitelist,
   senderMatches,
   stripHtmlToText,
+  validateForwardEmail,
   validateRegexPattern,
   validateSenderFilter
 } from "../src/email.js";
@@ -207,4 +213,28 @@ test("http and config utilities clamp inputs safely", () => {
   assert.equal(parseRetentionHours("24"), 24);
   assert.equal(parseRetentionHours("0"), 48);
   assert.equal(parseRetentionHours(undefined), 48);
+});
+
+test("PBKDF2 password hashing, HMAC session tokens, and settings validators work correctly", async () => {
+  const hashed = await hashAdminPassword("StrongPass#2026");
+  assert.equal(hashed.salt.length, 32);
+  assert.equal(hashed.hash.length, 64);
+  assert.equal(await verifyAdminPassword("StrongPass#2026", hashed), true);
+  assert.equal(await verifyAdminPassword("WrongPass#2026", hashed), false);
+
+  const sessionTok = await signSessionToken("secret-key-hex");
+  assert.equal(await verifySessionToken(sessionTok, "secret-key-hex"), true);
+  assert.equal(await verifySessionToken(sessionTok, "other-secret"), false);
+  assert.equal(await verifySessionToken(sessionTok.replace("v1.", "v2."), "secret-key-hex"), false);
+
+  assert.equal(validateSecretValue("").errorCode, "SECRET_REQUIRED");
+  assert.equal(validateSecretValue("1234567").errorCode, "SECRET_TOO_SHORT");
+  assert.equal(validateSecretValue("dev-admin-token").errorCode, "DISALLOWED_DEFAULT_SECRET");
+  assert.equal(validateSecretValue("ValidSecret#123").ok, true);
+  assert.equal(validateSecretValue("", { kind: "api" }).errorCode, "API_TOKEN_REQUIRED");
+
+  assert.equal(validateForwardEmail("", { required: true }).errorCode, "FORWARD_EMAIL_REQUIRED");
+  assert.equal(validateForwardEmail("", { required: false }).ok, true);
+  assert.equal(validateForwardEmail("bad-email").errorCode, "INVALID_FORWARD_EMAIL");
+  assert.equal(validateForwardEmail(" User@Example.COM ", { required: true }).value, "user@example.com");
 });

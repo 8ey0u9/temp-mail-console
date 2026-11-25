@@ -70,9 +70,15 @@ test("rendered HTML shells reference versioned static assets and contain no inli
   assert.match(weakTokenHtml, /auth\.weakTitle/);
   assert.doesNotMatch(weakTokenHtml, /<form/);
 
+  const setupHtml = renderAuthHtml({ setupMode: true });
+  assert.match(setupHtml, /setup-token/);
+  assert.match(setupHtml, /setup-token-confirm/);
+  assert.match(setupHtml, /auth\.setupHeading/);
+
   const consoleHtml = renderHtml({ pageSize: 20, rulesPageSize: 12 });
   assert.match(consoleHtml, /v-cloak/);
   assert.match(consoleHtml, new RegExp(`/assets/console\\.js\\?v=${ASSET_VERSION}`));
+  assert.match(consoleHtml, /activeTab === 'settings'/);
   assert.match(consoleHtml, /data-page-size="20"/);
   assert.match(consoleHtml, /data-rules-page-size="12"/);
 });
