@@ -258,3 +258,19 @@ export async function parseIncomingEmail(message) {
     truncated
   };
 }
+
+const SIMPLE_EMAIL_RE = /^[^\s@<>,"'`;:\\/()[\]]+@[^\s@<>,"'`;:\\/()[\]]+\.[^\s@<>,"'`;:\\/()[\]]+$/;
+
+export function validateForwardEmail(email, { required = false } = {}) {
+  const value = String(email || "").trim().toLowerCase();
+  if (!value) {
+    if (required) {
+      return { ok: false, error: "启用转发时必须填写目标邮箱", errorCode: "FORWARD_EMAIL_REQUIRED" };
+    }
+    return { ok: true, value: "" };
+  }
+  if (value.length > 254 || !SIMPLE_EMAIL_RE.test(value)) {
+    return { ok: false, error: "转发邮箱格式不正确", errorCode: "INVALID_FORWARD_EMAIL" };
+  }
+  return { ok: true, value };
+}

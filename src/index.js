@@ -5,9 +5,14 @@ import {
   buildSessionCookie,
   constantTimeEqual,
   getTokenSecurityState,
-  isAdminAuthorized,
+  hashAdminPassword,
   isApiAuthorized,
-  isWeakOrMissingToken
+  isRequestAdminAuthorized,
+  isWeakOrMissingToken,
+  randomHex,
+  signSessionToken,
+  validateSecretValue,
+  verifyAdminPassword
 } from "./auth.js";
 import {
   PAGE_SIZE,
@@ -16,8 +21,9 @@ import {
   clearAllEmails,
   deleteEmailByMessageId,
   ensureSchema,
+  getAllSystemSettings,
   getEmailByMessageId,
-  getWhitelistBlockedStats,
+  getRetentionConfig,
   insertEmail,
   loadRules,
   loadWhitelist,
@@ -28,6 +34,11 @@ import {
   queryTesterOptions,
   recordWhitelistBlocked,
   resetWhitelistBlockedStats,
+  setAdminAuthConfig,
+  setApiTokenConfig,
+  setForwardConfig,
+  setForwardError,
+  setRetentionConfig,
   updateEmailExtracted
 } from "./db.js";
 import {
@@ -37,6 +48,7 @@ import {
   senderInWhitelist,
   senderMatches,
   stripHtmlToText,
+  validateForwardEmail,
   validateRegexPattern,
   validateSenderFilter
 } from "./email.js";
@@ -54,6 +66,7 @@ import {
 import { renderAuthHtml, renderHtml } from "./ui.js";
 
 const DEFAULT_RETENTION_HOURS = 48;
+const MAX_RETENTION_HOURS = 8760;
 
 /**
  * 解析环境变量 RETENTION_HOURS，非法或非正数时兜底为 48 小时。
@@ -61,6 +74,48 @@ const DEFAULT_RETENTION_HOURS = 48;
 export function parseRetentionHours(rawValue) {
   const parsed = Number(rawValue);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RETENTION_HOURS;
+}
+
+function resolveEffectiveRetention(settings, env) {
+  const dbHours = Number(settings?.retention_config?.hours);
+  if (Number.isInteger(dbHours) && dbHours >= 1 && dbHours <= MAX_RETENTION_HOURS) {
+    return { hours: dbHours, source: "db" };
+  }
+  const hasEnv = String(env.RETENTION_HOURS || "").trim() !== "";
+  return { hours: parseRetentionHours(env.RETENTION_HOURS), source: hasEnv ? "env" : "default" };
+}
+
+function resolveEffectiveForward(settings, env) {
+  const fc = settings?.forward_config;
+  const lastError = settings?.forward_last_error || null;
+  if (fc && typeof fc === "object") {
+    const email = String(fc.email || "").trim();
+    const configuredEnabled = Boolean(fc.enabled);
+    return { enabled: Boolean(configuredEnabled && email), configuredEnabled, email, source: "db", lastError };
+  }
+  const envForward = String(env.FORWARD_TO || "").trim();
+  if (envForward) {
+    return { enabled: true, configuredEnabled: true, email: envForward, source: "env", lastError };
+  }
+  return { enabled: false, configuredEnabled: false, email: "", source: "none", lastError: null };
+}
+
+function resolveEffectiveApiToken(settings, env) {
+  const dbToken = String(settings?.api_token_config?.token || "").trim();
+  if (dbToken) return { token: dbToken, source: "db" };
+  const envToken = String(env.API_TOKEN || "").trim();
+  if (envToken) return { token: envToken, source: "env" };
+  return { token: "", source: "none" };
+}
+
+function resolveAdminMode(settings, env) {
+  const adminAuth = settings?.admin_auth;
+  if (adminAuth?.hash && adminAuth?.salt && adminAuth?.sessionSecret) {
+    return { mode: "db", adminAuth };
+  }
+  const envAdminToken = String(env.ADMIN_TOKEN || "").trim();
+  if (envAdminToken) return { mode: "env", envAdminToken };
+  return { mode: "setup" };
 }
 
 export default {
@@ -98,12 +153,17 @@ export default {
       receivedAt: now
     });
 
-    const forwardTo = String(env.FORWARD_TO || "").trim();
-    if (forwardTo) {
+    const settings = await getAllSystemSettings(env.DB);
+    const forward = resolveEffectiveForward(settings, env);
+    if (forward.enabled && forward.email) {
       try {
-        await message.forward(forwardTo);
+        await message.forward(forward.email);
+        if (forward.lastError) {
+          await setForwardError(env.DB, null);
+        }
       } catch (err) {
         console.error("邮件转发失败:", err);
+        await setForwardError(env.DB, err?.message || "Forward failed").catch(() => {});
       }
     }
   },
@@ -119,7 +179,8 @@ export default {
 
   async scheduled(event, env, ctx) {
     await ensureSchema(env.DB);
-    const retentionHours = parseRetentionHours(env.RETENTION_HOURS);
+    const retentionCfg = await getRetentionConfig(env.DB);
+    const retentionHours = resolveEffectiveRetention({ retention_config: retentionCfg }, env).hours;
     const expirationTime = Date.now() - retentionHours * 60 * 60 * 1000;
 
     ctx.waitUntil(
@@ -153,17 +214,19 @@ async function handleFetch(request, env) {
   if (pathname === "/api/emails/latest" || pathname === "/api/emails") {
     if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
     if (method !== "GET") return jsonError("Method Not Allowed", 405, CORS_HEADERS);
-    const apiBlocked = checkTokenPolicy(env.API_TOKEN, DEFAULT_API_TOKENS, request, {
+    await ensureSchema(env.DB);
+    const settings = await getAllSystemSettings(env.DB);
+    const effectiveApi = resolveEffectiveApiToken(settings, env);
+    const apiBlocked = checkTokenPolicy(effectiveApi.token, DEFAULT_API_TOKENS, request, {
       name: "API_TOKEN",
       headers: CORS_HEADERS,
       missingCode: "MISSING_API_TOKEN",
       weakCode: "WEAK_API_TOKEN"
     });
     if (apiBlocked) return apiBlocked.response;
-    if (!isApiAuthorized(request, env.API_TOKEN)) {
+    if (!isApiAuthorized(request, effectiveApi.token)) {
       return jsonError("Unauthorized", 401, CORS_HEADERS);
     }
-    await ensureSchema(env.DB);
     return pathname === "/api/emails/latest"
       ? handleApiEmailsLatest(url, env)
       : handleApiEmailsList(url, env);
@@ -171,23 +234,33 @@ async function handleFetch(request, env) {
 
   // ── 控制台页面 (/) ────────────────────────────────────────────────────────
   if (pathname === "/") {
-    const adminState = getTokenSecurityState(env.ADMIN_TOKEN, DEFAULT_ADMIN_TOKENS, request);
-    if (adminState !== "ok" || !isAdminAuthorized(request, env.ADMIN_TOKEN)) {
-      return new Response(
-        renderAuthHtml({
-          missingAdminToken: adminState === "missing",
-          weakAdminToken: adminState === "weak"
-        }),
-        { headers: HTML_HEADERS }
-      );
+    await ensureSchema(env.DB);
+    const settings = await getAllSystemSettings(env.DB);
+    const adminCtx = resolveAdminMode(settings, env);
+    if (adminCtx.mode === "setup") {
+      return new Response(renderAuthHtml({ setupMode: true }), { headers: HTML_HEADERS });
+    }
+    if (adminCtx.mode === "env") {
+      const envState = getTokenSecurityState(adminCtx.envAdminToken, DEFAULT_ADMIN_TOKENS, request);
+      if (envState === "weak") {
+        return new Response(renderAuthHtml({ weakAdminToken: true }), { headers: HTML_HEADERS });
+      }
+    }
+    if (!(await isRequestAdminAuthorized(request, adminCtx))) {
+      return new Response(renderAuthHtml(), { headers: HTML_HEADERS });
     }
     return new Response(renderHtml({ pageSize: PAGE_SIZE, rulesPageSize: RULES_PAGE_SIZE }), {
       headers: HTML_HEADERS
     });
   }
 
-  // ── 登录 / 登出端点 ───────────────────────────────────────────────────────
+  // ── 初始化 / 登录 / 登出端点 ────────────────────────────────────────────────
+  if (pathname === "/admin/setup" && method === "POST") {
+    await ensureSchema(env.DB);
+    return handleAdminSetup(request, env);
+  }
   if (pathname === "/admin/login" && method === "POST") {
+    await ensureSchema(env.DB);
     return handleAdminLogin(request, env);
   }
   if (pathname === "/admin/logout" && method === "POST") {
@@ -196,17 +269,24 @@ async function handleFetch(request, env) {
 
   // ── 管理 API (/admin/*) ───────────────────────────────────────────────────
   if (pathname.startsWith("/admin/")) {
-    const adminBlocked = checkTokenPolicy(env.ADMIN_TOKEN, DEFAULT_ADMIN_TOKENS, request, {
-      name: "ADMIN_TOKEN",
-      missingCode: "MISSING_ADMIN_TOKEN",
-      weakCode: "WEAK_ADMIN_TOKEN"
-    });
-    if (adminBlocked) return adminBlocked.response;
-    if (!isAdminAuthorized(request, env.ADMIN_TOKEN)) {
+    await ensureSchema(env.DB);
+    const settings = await getAllSystemSettings(env.DB);
+    const adminCtx = resolveAdminMode(settings, env);
+    if (adminCtx.mode === "setup") {
+      return jsonError("控制台尚未初始化管理员密码", 401, {}, "SETUP_REQUIRED");
+    }
+    if (adminCtx.mode === "env") {
+      const adminBlocked = checkTokenPolicy(adminCtx.envAdminToken, DEFAULT_ADMIN_TOKENS, request, {
+        name: "ADMIN_TOKEN",
+        missingCode: "MISSING_ADMIN_TOKEN",
+        weakCode: "WEAK_ADMIN_TOKEN"
+      });
+      if (adminBlocked) return adminBlocked.response;
+    }
+    if (!(await isRequestAdminAuthorized(request, adminCtx))) {
       return jsonError("Unauthorized", 401, {}, "UNAUTHORIZED");
     }
-    await ensureSchema(env.DB);
-    return routeAdminRequest(pathname, method, url, request, env);
+    return routeAdminRequest(pathname, method, url, request, env, { settings, adminCtx });
   }
 
   if (env.ASSETS && (method === "GET" || method === "HEAD")) {
@@ -215,8 +295,14 @@ async function handleFetch(request, env) {
   return new Response("Not Found", { status: 404 });
 }
 
-async function routeAdminRequest(pathname, method, url, request, env) {
-  if (pathname === "/admin/status" && method === "GET") return handleAdminStatus(env);
+async function routeAdminRequest(pathname, method, url, request, env, context) {
+  if (pathname === "/admin/status" && method === "GET") return handleAdminStatus(env, context.settings);
+  if (pathname === "/admin/settings/forward" && method === "PUT") return handleAdminSettingsForward(request, env);
+  if (pathname === "/admin/settings/retention" && method === "PUT") return handleAdminSettingsRetention(request, env);
+  if (pathname === "/admin/settings/api-token" && method === "PUT") return handleAdminSettingsApiToken(request, env);
+  if (pathname === "/admin/settings/admin-token" && method === "PUT") {
+    return handleAdminSettingsAdminToken(request, env, context.adminCtx);
+  }
   if (pathname === "/admin/tester/options" && method === "GET") return handleAdminTesterOptions(env);
 
   if (pathname === "/admin/emails" && method === "GET") return handleAdminEmails(url, env);
@@ -332,57 +418,230 @@ async function readValidatedBody(request, validator) {
   return { ok: true, value: validated.value, raw: parsedBody.data };
 }
 
+function maskSecret(secret) {
+  const s = String(secret || "");
+  if (!s) return "";
+  if (s.length <= 8) return "****";
+  return `${s.slice(0, 4)}••••${s.slice(-4)}`;
+}
+
 function checkTokenPolicy(token, defaultSet, request, { name, headers = {}, missingCode, weakCode }) {
   const state = getTokenSecurityState(token, defaultSet, request);
   if (state === "ok") return null;
   const message = state === "missing"
     ? `${name} 环境变量未配置`
-    : `生产环境禁止使用默认 ${name}，请在 Cloudflare Secrets 中修改为强密码`;
+    : `生产环境禁止使用默认 ${name}，请设置高强度密码`;
   return {
     state,
     response: jsonError(message, 503, headers, state === "missing" ? missingCode : weakCode)
   };
 }
 
+async function handleAdminSetup(request, env) {
+  const settings = await getAllSystemSettings(env.DB);
+  const adminCtx = resolveAdminMode(settings, env);
+  if (adminCtx.mode !== "setup") {
+    return jsonError("控制台已完成初始化，请直接登录", 409, {}, "ALREADY_INITIALIZED");
+  }
+
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return jsonError(parsed.error, 400, {}, "INVALID_JSON");
+
+  const check = validateSecretValue(parsed.data.token, {
+    kind: "admin",
+    defaultSet: DEFAULT_ADMIN_TOKENS
+  });
+  if (!check.ok) return jsonError(check.error, 400, {}, check.errorCode, check.errorMeta);
+
+  const { salt, hash } = await hashAdminPassword(check.value);
+  const sessionSecret = randomHex(32);
+  const inserted = await setAdminAuthConfig(
+    env.DB,
+    { salt, hash, sessionSecret, updatedAt: Date.now() },
+    { onlyIfMissing: true }
+  );
+  if (!inserted) {
+    return jsonError("控制台已完成初始化，请直接登录", 409, {}, "ALREADY_INITIALIZED");
+  }
+
+  const effectiveApi = resolveEffectiveApiToken(settings, env);
+  if (!effectiveApi.token) {
+    await setApiTokenConfig(env.DB, randomHex(16), { onlyIfMissing: true });
+  }
+
+  const sessionToken = await signSessionToken(sessionSecret);
+  return json({ ok: true }, 200, { "Set-Cookie": buildSessionCookie(sessionToken, request) });
+}
+
 async function handleAdminLogin(request, env) {
-  const adminBlocked = checkTokenPolicy(env.ADMIN_TOKEN, DEFAULT_ADMIN_TOKENS, request, {
+  const settings = await getAllSystemSettings(env.DB);
+  const adminCtx = resolveAdminMode(settings, env);
+  if (adminCtx.mode === "setup") {
+    return jsonError("控制台尚未初始化管理员密码", 409, {}, "SETUP_REQUIRED");
+  }
+
+  const parsed = await parseJsonBody(request);
+  const candidate = parsed.ok ? String(parsed.data.token || "").trim() : "";
+  if (!candidate) return jsonError("请输入访问密码", 400, {}, "EMPTY_TOKEN");
+
+  if (adminCtx.mode === "db") {
+    if (!(await verifyAdminPassword(candidate, adminCtx.adminAuth))) {
+      return jsonError("密码不正确，请重试", 401, {}, "WRONG_TOKEN");
+    }
+    const sessionToken = await signSessionToken(adminCtx.adminAuth.sessionSecret);
+    return json({ ok: true }, 200, { "Set-Cookie": buildSessionCookie(sessionToken, request) });
+  }
+
+  const adminBlocked = checkTokenPolicy(adminCtx.envAdminToken, DEFAULT_ADMIN_TOKENS, request, {
     name: "ADMIN_TOKEN",
     missingCode: "MISSING_ADMIN_TOKEN",
     weakCode: "WEAK_ADMIN_TOKEN"
   });
   if (adminBlocked) return adminBlocked.response;
 
-  const expected = String(env.ADMIN_TOKEN || "").trim();
-  const parsed = await parseJsonBody(request);
-  const candidate = parsed.ok ? String(parsed.data.token || "").trim() : "";
-  if (!candidate) return jsonError("请输入访问密码", 400, {}, "EMPTY_TOKEN");
-
-  if (!constantTimeEqual(candidate, expected)) {
+  if (!constantTimeEqual(candidate, adminCtx.envAdminToken)) {
     return jsonError("密码不正确，请重试", 401, {}, "WRONG_TOKEN");
   }
 
-  return json({ ok: true }, 200, { "Set-Cookie": buildSessionCookie(expected, request) });
+  return json({ ok: true }, 200, { "Set-Cookie": buildSessionCookie(adminCtx.envAdminToken, request) });
 }
 
-async function handleAdminStatus(env) {
+async function handleAdminStatus(env, settings = null) {
+  const resolved = settings || (await getAllSystemSettings(env.DB));
+  const adminCtx = resolveAdminMode(resolved, env);
+  const effectiveApi = resolveEffectiveApiToken(resolved, env);
+  const forward = resolveEffectiveForward(resolved, env);
+  const retention = resolveEffectiveRetention(resolved, env);
+
   const warnings = [];
   const warningCodes = [];
-  if (isWeakOrMissingToken(env.ADMIN_TOKEN, DEFAULT_ADMIN_TOKENS)) {
+  if (adminCtx.mode === "env" && isWeakOrMissingToken(adminCtx.envAdminToken, DEFAULT_ADMIN_TOKENS)) {
     warningCodes.push("default_admin_token");
-    warnings.push("当前正在使用默认 ADMIN_TOKEN，请及时通过 Wrangler Secret 或控制台环境变量修改为强密码");
+    warnings.push("当前正在使用默认 ADMIN_TOKEN，请及时在系统设置中修改为强密码");
   }
-  if (isWeakOrMissingToken(env.API_TOKEN, DEFAULT_API_TOKENS)) {
+  if (isWeakOrMissingToken(effectiveApi.token, DEFAULT_API_TOKENS)) {
     warningCodes.push("default_api_token");
-    warnings.push("API_TOKEN 未配置或仍为默认值，请尽快配置强密码后再对外集成");
+    warnings.push("API_TOKEN 未配置或仍为默认值，请在系统设置中生成或设置强密码");
   }
 
-  const whitelistBlocked = await getWhitelistBlockedStats(env.DB);
+  const rawBlocked = resolved?.whitelist_blocked_stats;
+  const whitelistBlocked = {
+    count: Number(rawBlocked?.count || 0),
+    last: rawBlocked?.last || null
+  };
+
   return json({
     warnings,
     warningCodes,
-    retentionHours: parseRetentionHours(env.RETENTION_HOURS),
-    forwardEnabled: Boolean(String(env.FORWARD_TO || "").trim()),
+    adminSource: adminCtx.mode === "db" ? "db" : "env",
+    retentionHours: retention.hours,
+    retentionSource: retention.source,
+    forwardEnabled: forward.enabled,
+    forward: {
+      enabled: forward.configuredEnabled,
+      email: forward.email,
+      source: forward.source,
+      lastError: forward.lastError
+    },
+    apiToken: {
+      configured: Boolean(effectiveApi.token),
+      value: effectiveApi.source === "db" ? effectiveApi.token : "",
+      masked: effectiveApi.token ? maskSecret(effectiveApi.token) : "",
+      source: effectiveApi.source
+    },
     whitelistBlocked
+  });
+}
+
+async function handleAdminSettingsForward(request, env) {
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return jsonError(parsed.error, 400, {}, "INVALID_JSON");
+
+  const enabled = Boolean(parsed.data.enabled);
+  const check = validateForwardEmail(parsed.data.email, { required: enabled });
+  if (!check.ok) return jsonError(check.error, 400, {}, check.errorCode);
+
+  await setForwardConfig(env.DB, { enabled, email: check.value });
+  await setForwardError(env.DB, null);
+  return json({
+    ok: true,
+    forwardEnabled: Boolean(enabled && check.value),
+    forward: { enabled, email: check.value, source: "db", lastError: null }
+  });
+}
+
+async function handleAdminSettingsRetention(request, env) {
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return jsonError(parsed.error, 400, {}, "INVALID_JSON");
+
+  const hours = Number(parsed.data.hours);
+  if (!Number.isInteger(hours) || hours < 1 || hours > MAX_RETENTION_HOURS) {
+    return jsonError(
+      `保留时长须为 1 到 ${MAX_RETENTION_HOURS} 之间的整数小时`,
+      400,
+      {},
+      "INVALID_RETENTION_HOURS",
+      { min: 1, max: MAX_RETENTION_HOURS }
+    );
+  }
+
+  await setRetentionConfig(env.DB, hours);
+  return json({ ok: true, retentionHours: hours, retentionSource: "db" });
+}
+
+async function handleAdminSettingsApiToken(request, env) {
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return jsonError(parsed.error, 400, {}, "INVALID_JSON");
+
+  let nextToken = "";
+  if (parsed.data.regenerate === true) {
+    nextToken = randomHex(16);
+  } else {
+    const check = validateSecretValue(parsed.data.token, {
+      kind: "api",
+      defaultSet: DEFAULT_API_TOKENS
+    });
+    if (!check.ok) return jsonError(check.error, 400, {}, check.errorCode, check.errorMeta);
+    nextToken = check.value;
+  }
+
+  await setApiTokenConfig(env.DB, nextToken);
+  return json({
+    ok: true,
+    apiToken: {
+      configured: true,
+      value: nextToken,
+      masked: maskSecret(nextToken),
+      source: "db"
+    }
+  });
+}
+
+async function handleAdminSettingsAdminToken(request, env, adminCtx) {
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return jsonError(parsed.error, 400, {}, "INVALID_JSON");
+
+  const currentPassword = String(parsed.data.current_password || "").trim();
+  const currentOk = adminCtx.mode === "db"
+    ? await verifyAdminPassword(currentPassword, adminCtx.adminAuth)
+    : constantTimeEqual(currentPassword, adminCtx.envAdminToken || "");
+  if (!currentOk) {
+    return jsonError("当前管理员密码不正确", 401, {}, "WRONG_CURRENT_TOKEN");
+  }
+
+  const check = validateSecretValue(parsed.data.new_password, {
+    kind: "admin",
+    defaultSet: DEFAULT_ADMIN_TOKENS
+  });
+  if (!check.ok) return jsonError(check.error, 400, {}, check.errorCode, check.errorMeta);
+
+  const { salt, hash } = await hashAdminPassword(check.value);
+  const sessionSecret = randomHex(32);
+  await setAdminAuthConfig(env.DB, { salt, hash, sessionSecret, updatedAt: Date.now() });
+
+  const sessionToken = await signSessionToken(sessionSecret);
+  return json({ ok: true, adminSource: "db" }, 200, {
+    "Set-Cookie": buildSessionCookie(sessionToken, request)
   });
 }
 

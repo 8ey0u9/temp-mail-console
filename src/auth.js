@@ -111,3 +111,149 @@ export function getTokenSecurityState(token, defaultSet, request) {
   if (defaultSet.has(trimmed) && !isLocalDevRequest(request)) return "weak";
   return "ok";
 }
+
+export const MIN_SECRET_LENGTH = 8;
+export const MAX_SECRET_LENGTH = 256;
+const PBKDF2_ITERATIONS = 100000;
+
+function bytesToHex(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) {
+    out += bytes[i].toString(16).padStart(2, "0");
+  }
+  return out;
+}
+
+function hexToBytes(hex) {
+  const clean = String(hex || "");
+  if (clean.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(clean)) return null;
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < clean.length; i += 2) {
+    out[i / 2] = Number.parseInt(clean.slice(i, i + 2), 16);
+  }
+  return out;
+}
+
+export function randomHex(byteLength = 16) {
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
+/**
+ * 使用 PBKDF2-SHA256 对管理员口令进行加盐哈希。
+ */
+export async function hashAdminPassword(password, saltHex = randomHex(16)) {
+  const saltBytes = hexToBytes(saltHex);
+  if (!saltBytes) throw new Error("Invalid salt hex");
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(String(password || "")),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await globalThis.crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    key,
+    256
+  );
+  return { salt: saltHex, hash: bytesToHex(new Uint8Array(bits)) };
+}
+
+export async function verifyAdminPassword(candidate, adminAuth) {
+  if (!adminAuth?.salt || !adminAuth?.hash) return false;
+  const input = String(candidate || "");
+  if (!input) return false;
+  const derived = await hashAdminPassword(input, adminAuth.salt);
+  return constantTimeEqual(derived.hash, adminAuth.hash);
+}
+
+async function computeHmacHex(secret, message) {
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await globalThis.crypto.subtle.sign("HMAC", key, textEncoder.encode(message));
+  return bytesToHex(new Uint8Array(sig));
+}
+
+/**
+ * 生成带有效期与 HMAC-SHA256 签名的会话令牌，避免在 Cookie 中存储明文密码。
+ */
+export async function signSessionToken(sessionSecret, ttlSeconds = 60 * 60 * 24 * 7) {
+  const expiresAt = Date.now() + ttlSeconds * 1000;
+  const payload = `v1.${expiresAt}`;
+  const sigHex = await computeHmacHex(sessionSecret, payload);
+  return `${payload}.${sigHex}`;
+}
+
+export async function verifySessionToken(token, sessionSecret) {
+  if (!token || !sessionSecret) return false;
+  const parts = String(token).split(".");
+  if (parts.length !== 3 || parts[0] !== "v1" || !/^\d+$/.test(parts[1])) return false;
+  const expiresAt = Number(parts[1]);
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
+  const expectedSig = await computeHmacHex(sessionSecret, `${parts[0]}.${parts[1]}`);
+  return constantTimeEqual(parts[2], expectedSig);
+}
+
+/**
+ * 校验管理请求鉴权：优先验证 D1 admin_auth（签名 Cookie 或 Bearer 口令），未初始化时回退环境变量。
+ */
+export async function isRequestAdminAuthorized(request, { adminAuth, envAdminToken } = {}) {
+  if (adminAuth?.hash && adminAuth?.sessionSecret) {
+    const cookies = parseCookies(request.headers.get("Cookie") || "");
+    if (await verifySessionToken(cookies[ADMIN_COOKIE_NAME] || "", adminAuth.sessionSecret)) {
+      return true;
+    }
+    const bearer = getBearerToken(request);
+    if (bearer && (await verifyAdminPassword(bearer, adminAuth))) {
+      return true;
+    }
+    return false;
+  }
+  return isAdminAuthorized(request, envAdminToken);
+}
+
+/**
+ * 校验控制台设置或首次初始化提交的管理员密码 / API Token 强度。
+ */
+export function validateSecretValue(value, { kind = "admin", defaultSet = DEFAULT_ADMIN_TOKENS } = {}) {
+  const trimmed = String(value || "").trim();
+  const isAdmin = kind === "admin";
+  if (!trimmed) {
+    return {
+      ok: false,
+      error: isAdmin ? "管理员密码不能为空" : "API_TOKEN 不能为空",
+      errorCode: isAdmin ? "SECRET_REQUIRED" : "API_TOKEN_REQUIRED"
+    };
+  }
+  if (trimmed.length < MIN_SECRET_LENGTH) {
+    return {
+      ok: false,
+      error: `长度不能少于 ${MIN_SECRET_LENGTH} 个字符`,
+      errorCode: "SECRET_TOO_SHORT",
+      errorMeta: { min: MIN_SECRET_LENGTH }
+    };
+  }
+  if (trimmed.length > MAX_SECRET_LENGTH) {
+    return {
+      ok: false,
+      error: `长度不能超过 ${MAX_SECRET_LENGTH} 个字符`,
+      errorCode: "SECRET_TOO_LONG",
+      errorMeta: { max: MAX_SECRET_LENGTH }
+    };
+  }
+  if (defaultSet.has(trimmed)) {
+    return {
+      ok: false,
+      error: "禁止使用公开默认弱口令，请更换为强随机密码",
+      errorCode: "DISALLOWED_DEFAULT_SECRET"
+    };
+  }
+  return { ok: true, value: trimmed };
+}

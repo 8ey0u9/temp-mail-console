@@ -419,3 +419,88 @@ export async function queryPagedWhitelist(db, page) {
     pageSize: RULES_PAGE_SIZE
   });
 }
+
+async function getMetaJson(db, key) {
+  const row = await db.prepare("SELECT value FROM schema_meta WHERE key = ?").bind(key).first();
+  if (!row?.value) return null;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return null;
+  }
+}
+
+async function setMetaJson(db, key, value, { onlyIfMissing = false } = {}) {
+  const sql = onlyIfMissing
+    ? "INSERT INTO schema_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING"
+    : "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)";
+  const res = await db.prepare(sql).bind(key, JSON.stringify(value)).run();
+  return Number(res?.meta?.changes || 0) > 0;
+}
+
+export async function getAdminAuthConfig(db) {
+  return getMetaJson(db, "admin_auth");
+}
+
+export async function setAdminAuthConfig(db, authConfig, options = {}) {
+  return setMetaJson(db, "admin_auth", authConfig, options);
+}
+
+export async function getApiTokenConfig(db) {
+  return getMetaJson(db, "api_token_config");
+}
+
+export async function setApiTokenConfig(db, token, options = {}) {
+  return setMetaJson(db, "api_token_config", { token, updatedAt: Date.now() }, options);
+}
+
+export async function getRetentionConfig(db) {
+  return getMetaJson(db, "retention_config");
+}
+
+export async function setRetentionConfig(db, hours) {
+  return setMetaJson(db, "retention_config", { hours, updatedAt: Date.now() });
+}
+
+export async function getForwardConfig(db) {
+  return getMetaJson(db, "forward_config");
+}
+
+export async function setForwardConfig(db, { enabled, email }) {
+  return setMetaJson(db, "forward_config", {
+    enabled: Boolean(enabled),
+    email: String(email || "").trim(),
+    updatedAt: Date.now()
+  });
+}
+
+export async function setForwardError(db, message) {
+  if (!message) {
+    await db.prepare("DELETE FROM schema_meta WHERE key = 'forward_last_error'").run();
+    return;
+  }
+  await setMetaJson(db, "forward_last_error", {
+    message: String(message).slice(0, 300),
+    at: Date.now()
+  });
+}
+
+/**
+ * 一次性读取所有系统配置与统计项，减少 D1 查询往返。
+ */
+export async function getAllSystemSettings(db) {
+  const res = await db
+    .prepare(
+      "SELECT key, value FROM schema_meta WHERE key IN ('admin_auth', 'api_token_config', 'forward_config', 'forward_last_error', 'retention_config', 'whitelist_blocked_stats')"
+    )
+    .all();
+  const map = {};
+  for (const row of res?.results || []) {
+    try {
+      map[row.key] = JSON.parse(row.value);
+    } catch {
+      map[row.key] = null;
+    }
+  }
+  return map;
+}
